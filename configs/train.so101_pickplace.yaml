@@ -1,0 +1,25 @@
+# Reference training config for Phase 1 fine-tuning.
+#
+# These values mirror the canonical SmolVLA fine-tune and are surfaced here for the record;
+# scripts/train.sh passes them to `lerobot-train` as CLI flags (LeRobot v0.5.0 is primarily
+# CLI/argparse-driven). Treat this file as documentation + the single source of truth for the
+# hyperparameters, and keep it in sync with train.sh.
+
+policy:
+  path: lerobot/smolvla_base          # fine-tune FROM the pretrained base
+
+dataset:
+  repo_id: lerobot/svla_so101_pickplace
+
+train:
+  batch_size: 64                      # ~11.5 GB at bs 44; use 16 (~6 GB) on small GPUs
+  steps: 20000                        # ~4 h on a single A100; much slower on Titan X
+  save_freq: 2000
+  eval_freq: 0                        # eval done separately via smolvla_edge.eval
+  output_dir: outputs/train/smolvla_so101
+
+# Hardware note:
+#   Rent an A100/H100 for the real run. The Titan X (Maxwell, 12 GB, pre-Tensor-core) can
+#   train at batch_size 16 but is much slower — keep it for dev + inference.
+wandb:
+  enable: false                       # set true and `wandb login` to log the run

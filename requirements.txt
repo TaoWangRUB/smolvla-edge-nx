@@ -1,0 +1,19 @@
+# Core: LeRobot pinned to v0.5.0 with the SmolVLA extra.
+# The [smolvla] extra pulls in transformers, torchcodec, num2words, accelerate, etc.
+lerobot[smolvla]==0.5.0
+
+# Client/server deployment (gRPC)
+grpcio==1.66.2
+grpcio-tools==1.66.2
+protobuf>=5.27,<6
+
+# Benchmarking / plotting
+numpy
+pandas
+matplotlib
+imageio[ffmpeg]   # for assembling the demo GIF from replayed episodes
+
+# NOTE:
+# - System ffmpeg is required for video decoding: `sudo apt-get install -y ffmpeg`.
+# - On the Jetson Xavier NX, do NOT install torch from PyPI. Use the NVIDIA-provided
+#   aarch64 wheels matching your JetPack. See docs/setup-jetson.md.

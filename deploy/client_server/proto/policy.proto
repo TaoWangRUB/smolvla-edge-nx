@@ -1,0 +1,58 @@
+syntax = "proto3";
+
+package smolvla_edge;
+
+// Client/server deployment: the policy runs on the workstation (Titan X) and the Xavier NX
+// is a thin control client. This mirrors how real robots offload inference. The proto carries
+// a flattened observation up and an action chunk back down.
+
+service Policy {
+  // One observation in, one action (or action chunk) out.
+  rpc SelectAction(Observation) returns (ActionChunk);
+
+  // Reset policy internal state (action queue, etc.) at episode boundaries.
+  rpc Reset(ResetRequest) returns (ResetReply);
+
+  // Liveness / metadata probe.
+  rpc Health(HealthRequest) returns (HealthReply);
+}
+
+// A single image stream (raw bytes + shape so we avoid pinning an encoding).
+message Image {
+  string key = 1;          // e.g. "observation.images.top"
+  bytes data = 2;          // row-major uint8 buffer (HWC) or encoded (see 'encoding')
+  repeated int32 shape = 3; // [H, W, C]
+  string encoding = 4;     // "raw_uint8" | "jpeg" | "png"
+}
+
+// A named float vector (proprioceptive state, etc.).
+message Tensor {
+  string key = 1;          // e.g. "observation.state"
+  repeated float data = 2;
+  repeated int32 shape = 3;
+}
+
+message Observation {
+  repeated Image images = 1;
+  repeated Tensor tensors = 2;
+  string task = 3;         // natural-language task / instruction for the VLM
+  double client_send_ts = 4; // unix seconds, for round-trip latency accounting
+}
+
+message ActionChunk {
+  repeated float data = 1; // flattened [horizon, action_dim]
+  repeated int32 shape = 2; // [horizon, action_dim]
+  double server_recv_ts = 3;
+  double server_send_ts = 4;
+}
+
+message ResetRequest {}
+message ResetReply { bool ok = 1; }
+
+message HealthRequest {}
+message HealthReply {
+  bool ok = 1;
+  string device = 2;
+  string precision = 3;
+  string policy_path = 4;
+}

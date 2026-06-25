@@ -1,0 +1,50 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+.venv/
+venv/
+env/
+.python-version
+
+# Training artifacts
+outputs/
+checkpoints/
+*.safetensors
+*.pt
+*.pth
+wandb/
+runs/
+logs/
+
+# Datasets / HF cache (keep out of git; use HF hub)
+data/
+.cache/
+*.parquet
+*.mp4
+*.arrow
+
+# TensorRT / ONNX engines
+*.onnx
+*.engine
+*.plan
+*.trt
+
+# Generated gRPC stubs
+*_pb2.py
+*_pb2_grpc.py
+
+# Benchmarks: keep curated results/*.md & *.csv, ignore raw dumps
+benchmarks/results/raw/
+
+# Editor / OS
+.idea/
+.vscode/
+.DS_Store
+*.swp
+
+# Keep these placeholder dirs tracked
+!**/.gitkeep
