@@ -5,7 +5,7 @@ No physical robot or live sim required — this reads images straight out of a L
 
     python scripts/make_demo_gif.py \
         --dataset-repo-id lerobot/svla_so101_pickplace \
-        --episodes 1 --out docs/assets/demo.gif
+        --episodes 1 --out benchmarks/results/demo.gif
 """
 
 from __future__ import annotations
@@ -38,7 +38,7 @@ def main() -> None:
     ap.add_argument("--episodes", type=int, default=1)
     ap.add_argument("--max-frames", type=int, default=120)
     ap.add_argument("--fps", type=int, default=15)
-    ap.add_argument("--out", default="docs/assets/demo.gif")
+    ap.add_argument("--out", default="benchmarks/results/demo.gif")
     args = ap.parse_args()
 
     import imageio.v2 as imageio

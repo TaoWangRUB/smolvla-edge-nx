@@ -42,4 +42,4 @@ python benchmarks/collate.py
 ## Demo media
 
 Add the GIF/short video of the policy executing replayed episodes (built by
-`scripts/make_demo_gif.py`) to `../docs/assets/` and embed it in the top-level README.
+`scripts/make_demo_gif.py`) to `results/` and embed it in the top-level README.
