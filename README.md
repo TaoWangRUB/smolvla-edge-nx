@@ -31,8 +31,8 @@ edge deployment and latency engineering.
 - **In scope — manipulation (SO-101).** SmolVLA is pretrained on SO-100/SO-101 manipulation
   data, so a public SO-101 dataset is the turnkey path to a correct checkpoint.
 - **Future work — mobile rover.** A rover is a different embodiment (mobile base, not an arm).
-  Adapting SmolVLA to it is a research project, not a two-week demo. See
-  [docs/future-work-rover.md](docs/future-work-rover.md).
+  Adapting SmolVLA to it is a research project, not a two-week demo. See the *Non-Goals* in
+  [the change design](openspec/changes/smolvla-edge-deployment/design.md).
 
 ---
 
@@ -45,7 +45,7 @@ edge deployment and latency engineering.
 | 2 | **Edge deployment** (the differentiator) — on-device + client/server | ☐ | Xavier NX 8 GB; chunking, low-Hz VLM, INT8 where the graph converts |
 | 3 | **Benchmarks + writeup** (the centerpiece) — latency table + video | ☐ | Titan X vs NX (FP16/INT8, ±chunking) vs NX-client/workstation-server |
 
-Track progress in [docs/roadmap.md](docs/roadmap.md).
+Track progress in [the change tasks](openspec/changes/smolvla-edge-deployment/tasks.md).
 
 ---
 
@@ -67,8 +67,9 @@ pip install -r requirements.txt          # pins lerobot[smolvla]==0.5.0
 #   (torchcodec is pulled in by lerobot[smolvla])
 ```
 
-See [docs/setup-jetson.md](docs/setup-jetson.md) for the Xavier NX (JetPack) setup, which is
-its own world (aarch64 wheels, TensorRT, power modes).
+See the *Xavier NX (JetPack) setup* section of
+[the change design](openspec/changes/smolvla-edge-deployment/design.md) for the edge setup, which
+is its own world (aarch64 wheels, TensorRT, power modes).
 
 ---
 
@@ -136,9 +137,11 @@ smolvla-edge-nx/
 ├── deploy/
 │   ├── ondevice/          # Xavier NX on-device notes, quantization/TRT attempts
 │   └── client_server/     # gRPC server (workstation) + client (NX), proto
-├── benchmarks/            # benchmark harness + results table
-└── docs/                  # roadmap, setup, future-work
+└── benchmarks/            # benchmark harness + results table
 ```
+
+Project plans, design, specs, and the phased task list live in
+[openspec/changes/smolvla-edge-deployment/](openspec/changes/smolvla-edge-deployment/).
 
 ## License
 
