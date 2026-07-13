@@ -51,53 +51,107 @@ Track progress in [the change tasks](openspec/changes/smolvla-edge-deployment/ta
 
 ## Environment
 
-- **Dev + inference:** Titan X (Maxwell, 12 GB — pre-Tensor-core).
-- **Training run:** rent an A100/H100 for a few hours (≈20k steps ≈ 4 h on a single A100).
-  The Titan X *can* train at batch 16 (~6 GB) but will be much slower; keep it for dev.
-- **Edge target:** Jetson Xavier NX, 8 GB.
-- **LeRobot:** pinned to `v0.5.0` (see [requirements.txt](requirements.txt)).
+### Docker (preferred) — matched-simulator container
+
+The recommended way to run everything (sim eval, inference, fine-tuning, benchmarks) is the
+Docker environment: [docker/Dockerfile](docker/Dockerfile) + [docker-compose.yml](docker-compose.yml),
+following the same conventions as the BEV_Jetson / rover projects (nvidia runtime, repo mounted
+at `/workspace`, per-purpose compose services).
+
+**Why a container is not just convenience here — it fixes a real version conflict:**
+
+- `lerobot >= 0.5.0` requires **Python ≥ 3.12**
+- gym-aloha's pinned `mujoco 2.3.7` (the version the ALOHA sim datasets/checkpoints were
+  generated with) only has wheels for **Python ≤ 3.11**
+
+These are mutually exclusive in one native env. The container runs **py3.11 + lerobot 0.4.4 +
+the matched mujoco 2.3.7 / dm_control 1.0.14 pair** — and the match is measurable: the pretrained
+ACT transfer-cube checkpoint scores **80 % success in-container vs 60 % on a host mujoco 3.x**
+stack. Details in [the change design](openspec/changes/smolvla-edge-deployment/design.md)
+(*"Simulation setup — verified findings"*).
+
+Prerequisites: Docker with the NVIDIA container runtime (`docker info | grep -i nvidia`).
+Compose v2 (`docker compose`) or legacy v1 (`docker-compose`) both work.
 
 ```bash
-# On the Titan X dev box (and the training box)
-python -m venv .venv && source .venv/bin/activate
-pip install -U pip
-pip install -r requirements.txt          # pins lerobot[smolvla]==0.5.0
-# System deps for video decoding:
-#   sudo apt-get install -y ffmpeg
-#   (torchcodec is pulled in by lerobot[smolvla])
+docker compose build                    # build the smolvla-edge:sim image (once, ~8 GB)
+
+docker compose run --rm verify          # known-good baseline: pretrained ACT on transfer cube
+                                        #   -> expect ~80% success (4/5 episodes)
+
+docker compose run --rm shell           # interactive shell inside the container
+
+# generic eval — pass any smolvla_edge.eval flags via EVAL_ARGS:
+EVAL_ARGS="--mode sim --policy-path lerobot/act_aloha_sim_insertion_human \
+           --env-id gym_aloha/AlohaInsertion-v0 --episodes 10 --task ''" \
+  docker compose run --rm eval
+
+docker compose run --rm infer           # smoke-test smolvla_base on its SO-101 dataset
+docker compose run --rm train           # fine-tune via scripts/train.sh (needs a big GPU)
+BENCH_ARGS="--policy-path <ckpt> --precision fp16" docker compose run --rm bench
 ```
 
-See the *Xavier NX (JetPack) setup* section of
-[the change design](openspec/changes/smolvla-edge-deployment/design.md) for the edge setup, which
-is its own world (aarch64 wheels, TensorRT, power modes).
+Notes:
+- The repo root is mounted at `/workspace`; edits on the host are live in the container.
+- Model/dataset downloads persist across runs in the `hf-cache` / `torch-cache` volumes.
+- Headless rendering uses `MUJOCO_GL=egl` (GPU). If EGL is unavailable:
+  `MUJOCO_GL=osmesa docker compose run --rm verify` (CPU rendering, slower).
+- Set `HF_TOKEN=...` in the environment for authenticated/faster HF downloads.
+
+### Native (host) install — alternative
+
+A host install works too, but which mujoco you get depends on the Python version, and
+**mujoco 3.x will under-score checkpoints/datasets generated under 2.x** (see above):
+
+```bash
+# Python 3.10/3.11: requirements.txt works as-is (matched mujoco 2.3.7)
+pip install -r requirements.txt && sudo apt-get install -y ffmpeg
+
+# Python 3.12: gym-aloha's mujoco pin has no wheel — use the verified workaround
+bash scripts/setup_sim.sh               # lerobot 0.5.0 + mujoco 3.x + gym-aloha --no-deps
+```
+
+### Hardware
+
+- **Dev + inference:** any CUDA GPU (verified on an RTX 2000 Ada laptop GPU, WSL2).
+- **Training run:** rent an A100/H100 for a few hours (≈20k steps ≈ 4 h on a single A100).
+- **Edge target (optional):** Jetson Xavier NX, 8 GB — see the *Xavier NX (JetPack) setup*
+  section of [the change design](openspec/changes/smolvla-edge-deployment/design.md); the Jetson
+  is its own world (aarch64 wheels, TensorRT, power modes) and does not use this image.
 
 ---
 
-## Quickstart
+## Quickstart (Docker)
 
 ```bash
-# 0. Smoke-test the stack on the base model BEFORE training anything.
-python -m smolvla_edge.infer \
-  --policy-path lerobot/smolvla_base \
-  --dataset-repo-id lerobot/svla_so101_pickplace \
-  --episodes 2
+# 0. Build the image, then prove the whole sim/eval pipeline with a pretrained policy
+#    BEFORE training anything (verify-first): env, rollout, normalization, success metric.
+docker compose build
+docker compose run --rm verify          # pretrained ACT, transfer cube -> ~80% success
 
-# 1. Fine-tune (run this on the rented A100/H100).
-bash scripts/train.sh         # wraps lerobot-train, see configs/train.so101_pickplace.yaml
+# 1. Smoke-test the SmolVLA base model (pairs with its SO-101 embodiment dataset).
+docker compose run --rm infer
 
-# 2. Evaluate the checkpoint on held-out episodes -> success rate.
-python -m smolvla_edge.eval \
-  --policy-path outputs/train/smolvla_so101/checkpoints/last \
-  --dataset-repo-id lerobot/svla_so101_pickplace
+# 2. Fine-tune SmolVLA on the ALOHA sim dataset (run on a big GPU; see configs/train.aloha_sim.yaml).
+docker compose run --rm train
 
-# 3a. On-device benchmark (run on the Xavier NX).
-python -m smolvla_edge.bench \
-  --policy-path <checkpoint> --device cuda --precision fp16 --chunking on
+# 3. Evaluate YOUR checkpoint closed-loop in sim -> the success-rate deliverable.
+EVAL_ARGS="--mode sim --policy-path outputs/train/smolvla_aloha/checkpoints/last \
+           --env-id gym_aloha/AlohaInsertion-v0 --episodes 20" \
+  docker compose run --rm eval
 
-# 3b. Client/server: policy on the workstation, NX as the control client.
-python deploy/client_server/server.py --policy-path <checkpoint>   # on Titan X box
-python deploy/client_server/client.py --server <host:port>         # on Xavier NX
+# 4a. Latency benchmark for one deployment config.
+BENCH_ARGS="--policy-path <checkpoint> --device cuda --precision fp16 --chunking on \
+            --tag local-fp16 --out benchmarks/results/raw/local_fp16.json" \
+  docker compose run --rm bench
+
+# 4b. (optional, with a Jetson) client/server: policy on the workstation, NX as control client.
+python deploy/client_server/server.py --policy-path <checkpoint>   # on the workstation
+python deploy/client_server/client.py --server <host:port>         # on the Xavier NX
 ```
+
+Every step also runs natively (same commands without the compose wrapper, e.g.
+`python -m smolvla_edge.eval ...`) if you set up a host env per the *Environment* section.
 
 ---
 
