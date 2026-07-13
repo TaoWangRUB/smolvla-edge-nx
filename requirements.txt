@@ -2,6 +2,12 @@
 # The [smolvla] extra pulls in transformers, torchcodec, num2words, accelerate, etc.
 lerobot[smolvla]==0.5.0
 
+# Simulation evaluation (no robot required): gym-aloha is a LeRobot-native MuJoCo env.
+# Provides gym_aloha/AlohaInsertion-v0 and gym_aloha/AlohaTransferCube-v0. Needs a working
+# MuJoCo (pulled in transitively) and, on a headless box, an EGL/osmesa GL backend
+# (e.g. `export MUJOCO_GL=egl`).
+gym-aloha==0.1.1
+
 # Client/server deployment (gRPC)
 grpcio==1.66.2
 grpcio-tools==1.66.2

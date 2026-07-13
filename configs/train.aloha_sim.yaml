@@ -1,0 +1,36 @@
+# Reference training config for Phase 1 fine-tuning — ALOHA simulation showcase (no robot).
+#
+# Fine-tunes SmolVLA on a LeRobot-native MuJoCo ALOHA sim dataset, so the full
+# train -> evaluate (closed-loop) -> demo loop runs without any physical robot or Jetson.
+# scripts/train.sh passes these to `lerobot-train` as CLI flags (LeRobot v0.5.0 is CLI-driven);
+# treat this file as the single source of truth for the hyperparameters and keep it in sync.
+
+policy:
+  path: lerobot/smolvla_base            # fine-tune FROM the pretrained base
+
+dataset:
+  # ALOHA sim insertion (bimanual, 14-D action). Alternatives:
+  #   lerobot/aloha_sim_transfer_cube_human  (pairs with gym_aloha/AlohaTransferCube-v0)
+  #   *_scripted variants for larger, cleaner demos.
+  repo_id: lerobot/aloha_sim_insertion_human
+
+# Closed-loop evaluation is done separately via `smolvla_edge.eval --mode sim` against the
+# matching gym env (below). This is the success-rate deliverable.
+eval:
+  env_id: gym_aloha/AlohaInsertion-v0
+  task: "insert the peg into the socket"
+  episodes: 20
+
+train:
+  batch_size: 64                        # ~11.5 GB at bs 44; use 16 (~6 GB) on small GPUs
+  steps: 20000                          # ~4 h on a single A100; much slower on Titan X
+  save_freq: 2000
+  eval_freq: 0                          # closed-loop eval handled by smolvla_edge.eval
+  output_dir: outputs/train/smolvla_aloha
+
+# Hardware note:
+#   Fine-tuning still wants a real GPU (rent an A100/H100, or the Titan X at batch 16, slower).
+#   But the closed-loop sim eval + demo GIF run on modest hardware — no robot, no Jetson needed.
+#   On a headless training/eval box set `export MUJOCO_GL=egl` so MuJoCo renders offscreen.
+wandb:
+  enable: false                         # set true and `wandb login` to log the run

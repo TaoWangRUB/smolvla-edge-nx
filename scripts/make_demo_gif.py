@@ -4,7 +4,7 @@ No physical robot or live sim required — this reads images straight out of a L
 (optionally overlaying the policy's predicted action) and writes a GIF for the README.
 
     python scripts/make_demo_gif.py \
-        --dataset-repo-id lerobot/svla_so101_pickplace \
+        --dataset-repo-id lerobot/aloha_sim_insertion_human \
         --episodes 1 --out benchmarks/results/demo.gif
 """
 
@@ -34,7 +34,7 @@ def to_uint8_hwc(t):
 
 def main() -> None:
     ap = argparse.ArgumentParser(description="Build a demo GIF from dataset frames.")
-    ap.add_argument("--dataset-repo-id", default="lerobot/svla_so101_pickplace")
+    ap.add_argument("--dataset-repo-id", default="lerobot/aloha_sim_insertion_human")
     ap.add_argument("--episodes", type=int, default=1)
     ap.add_argument("--max-frames", type=int, default=120)
     ap.add_argument("--fps", type=int, default=15)
