@@ -1,11 +1,16 @@
 """Phase 1 smoke-test: load a policy + dataset and run inference end-to-end.
 
-Run this FIRST, on `lerobot/smolvla_base`, to validate the whole stack (model download,
-dataset decode, action prediction) before spending GPU-hours on training.
+Run this FIRST to validate the whole stack (model download, dataset decode, action prediction)
+before spending GPU-hours on training.
+
+Pair the policy with a dataset of the SAME embodiment: `lerobot/smolvla_base` is SO-101 (single
+arm), so smoke-test it against an SO-101 dataset. A fine-tuned ALOHA checkpoint pairs with the
+ALOHA dataset. Mismatched pairs fail on the input-feature dims. (To verify a policy *in the ALOHA
+sim env* instead of a dataset, use `smolvla_edge.eval --mode sim`.)
 
     python -m smolvla_edge.infer \
         --policy-path lerobot/smolvla_base \
-        --dataset-repo-id lerobot/aloha_sim_insertion_human \
+        --dataset-repo-id lerobot/svla_so101_pickplace \
         --episodes 2
 """
 
@@ -19,7 +24,8 @@ from .common import Timer, load_dataset, load_policy
 def main() -> None:
     ap = argparse.ArgumentParser(description="SmolVLA inference smoke-test.")
     ap.add_argument("--policy-path", default="lerobot/smolvla_base")
-    ap.add_argument("--dataset-repo-id", default="lerobot/aloha_sim_insertion_human")
+    # Default matches the base policy's SO-101 embodiment (see module docstring).
+    ap.add_argument("--dataset-repo-id", default="lerobot/svla_so101_pickplace")
     ap.add_argument("--episodes", type=int, default=2, help="How many episodes to stream.")
     ap.add_argument("--max-frames", type=int, default=50, help="Frames per episode cap.")
     ap.add_argument("--device", default="auto")

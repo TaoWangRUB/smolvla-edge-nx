@@ -6,12 +6,13 @@
 - [ ] 1.4 Create env on the dev box: `pip install -r requirements.txt` (+ system ffmpeg, MuJoCo/`MUJOCO_GL=egl`)
 - [x] 1.5 Confirm the showcase task — **ALOHA sim insertion** (`gym_aloha/AlohaInsertion-v0`, dataset `lerobot/aloha_sim_insertion_human`). Chosen so the correctness loop runs with **no robot**; real SO-101 is out of scope for now (no hardware). See `configs/train.aloha_sim.yaml`.
 
-## 2. Correctness — fine-tune in simulation (Phase 1)
+## 2. Correctness — verify in sim, then fine-tune (Phase 1)
 
-- [ ] 2.1 Smoke-test the stack: `python -m smolvla_edge.infer` on `lerobot/smolvla_base` + the ALOHA sim dataset
-- [ ] 2.2 Fine-tune on a rented A100/H100 (or Titan X, slower): `bash scripts/train.sh` w/ `configs/train.aloha_sim.yaml`
-- [ ] 2.3 Verify the obs→policy key mapping in `smolvla_edge.eval._aloha_obs_to_batch` against `policy.config.input_features`
-- [ ] 2.4 Evaluate closed-loop in gym-aloha → success-rate number (deliverable): `python -m smolvla_edge.eval --mode sim --env-id gym_aloha/AlohaInsertion-v0 --episodes 20`
+- [ ] 2.1 Smoke-test the stack: `python -m smolvla_edge.infer --policy-path lerobot/smolvla_base --dataset-repo-id lerobot/svla_so101_pickplace` (base is SO-101 embodiment — pair accordingly)
+- [ ] 2.2 **Verify-first (no fine-tune):** run a pretrained ALOHA policy through the harness to prove env + rollout + obs mapping and get a baseline success rate: `python -m smolvla_edge.eval --mode sim --policy-path lerobot/act_aloha_sim_insertion_human --env-id gym_aloha/AlohaInsertion-v0 --episodes 20 --task ""`
+- [ ] 2.3 Fine-tune SmolVLA on the ALOHA dataset: `bash scripts/train.sh` (uses `configs/train.aloha_sim.yaml`; A100/H100, or Titan X slower)
+- [ ] 2.4 Verify the obs→policy key mapping in `smolvla_edge.eval._aloha_obs_to_batch` against your checkpoint's `policy.config.input_features` (largely settled once 2.2 passes)
+- [ ] 2.5 Evaluate the fine-tuned SmolVLA closed-loop → success-rate number (deliverable): `python -m smolvla_edge.eval --mode sim --policy-path outputs/train/smolvla_aloha/checkpoints/last --env-id gym_aloha/AlohaInsertion-v0 --episodes 20`
 
 ## 3. Edge deployment — Xavier NX (Phase 2, OPTIONAL — only if a Jetson NX is on hand)
 
