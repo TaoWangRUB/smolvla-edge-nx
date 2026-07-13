@@ -5,7 +5,7 @@ dataset decode, action prediction) before spending GPU-hours on training.
 
     python -m smolvla_edge.infer \
         --policy-path lerobot/smolvla_base \
-        --dataset-repo-id lerobot/svla_so101_pickplace \
+        --dataset-repo-id lerobot/aloha_sim_insertion_human \
         --episodes 2
 """
 
@@ -19,7 +19,7 @@ from .common import Timer, load_dataset, load_policy
 def main() -> None:
     ap = argparse.ArgumentParser(description="SmolVLA inference smoke-test.")
     ap.add_argument("--policy-path", default="lerobot/smolvla_base")
-    ap.add_argument("--dataset-repo-id", default="lerobot/svla_so101_pickplace")
+    ap.add_argument("--dataset-repo-id", default="lerobot/aloha_sim_insertion_human")
     ap.add_argument("--episodes", type=int, default=2, help="How many episodes to stream.")
     ap.add_argument("--max-frames", type=int, default=50, help="Frames per episode cap.")
     ap.add_argument("--device", default="auto")

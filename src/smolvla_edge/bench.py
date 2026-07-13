@@ -107,7 +107,7 @@ def run(args) -> dict:
 def main() -> None:
     ap = argparse.ArgumentParser(description="Benchmark a SmolVLA deployment config.")
     ap.add_argument("--policy-path", required=True)
-    ap.add_argument("--dataset-repo-id", default="lerobot/svla_so101_pickplace")
+    ap.add_argument("--dataset-repo-id", default="lerobot/aloha_sim_insertion_human")
     ap.add_argument("--device", default="auto")
     ap.add_argument("--precision", choices=["fp32", "fp16", "bf16", "int8"], default="fp16")
     ap.add_argument(

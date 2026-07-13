@@ -9,15 +9,19 @@ checkpoint fast, then spend the real effort on edge deployment and latency engin
 
 ## What Changes
 
-- Add a fine-tuning + validation path: smoke-test the stack on `lerobot/smolvla_base`, fine-tune
-  on a public SO-101 pick-and-place dataset, and report a held-out success rate.
-- Add **on-device** Xavier NX deployment: action chunking / decoupled execution, a low-Hz VLM
-  stage, FP16, and INT8 only via real quantization/TensorRT on subgraphs that convert (naive
-  INT8 casts are rejected on purpose).
-- Add a **client/server** deployment mode: policy on the Titan X workstation, NX as a thin gRPC
-  control client, giving a second benchmark point that includes network overhead.
-- Add a cross-tier **latency benchmark harness** producing a results table (Titan X local; NX
-  on-device FP16/INT8 ±chunking; NX-client/WS-server) plus a demo GIF of replayed episodes.
+- Add a **simulation** fine-tuning + validation path (no robot required): smoke-test on
+  `lerobot/smolvla_base`, fine-tune on a LeRobot-native ALOHA sim dataset
+  (`lerobot/aloha_sim_insertion_human`), and report a **closed-loop success rate** by rolling out
+  in the matching gym-aloha MuJoCo env (`gym_aloha/AlohaInsertion-v0`). An open-loop replay proxy
+  remains as a no-sim fallback. (Real SO-101 on hardware is deferred — no robot on hand.)
+- Add **on-device** Xavier NX deployment (**optional, only with a Jetson on hand**): action
+  chunking / decoupled execution, a low-Hz VLM stage, FP16, and INT8 only via real
+  quantization/TensorRT on subgraphs that convert (naive INT8 casts are rejected on purpose).
+- Add a **client/server** deployment mode (optional): policy on a workstation, a second host as a
+  thin gRPC control client, giving a benchmark point that includes network overhead.
+- Add a cross-tier **latency benchmark harness** producing a results table (local GPU always;
+  NX on-device FP16/INT8 ±chunking and client/server when a Jetson is available) plus a demo GIF
+  built from ALOHA sim frames.
 - Migrate the forward-looking planning docs (`docs/roadmap.md`, `docs/setup-jetson.md`,
   `docs/future-work-rover.md`) into this OpenSpec change; the mobile-rover embodiment is recorded
   as an explicit non-goal.
@@ -25,8 +29,8 @@ checkpoint fast, then spend the real effort on edge deployment and latency engin
 ## Capabilities
 
 ### New Capabilities
-- `smolvla-finetuning`: validate the LeRobot/SmolVLA stack and fine-tune a correct SO-101
-  pick-and-place checkpoint with a held-out success-rate metric.
+- `smolvla-finetuning`: validate the LeRobot/SmolVLA stack and fine-tune a correct ALOHA-sim
+  checkpoint, reporting a closed-loop success rate from gym-aloha rollouts (no robot).
 - `edge-ondevice-inference`: run the fine-tuned policy entirely on a Jetson Xavier NX (8 GB)
   under real-time constraints using chunking, a low-Hz VLM stage, and FP16/INT8 precision.
 - `edge-client-server`: offload inference to a workstation over gRPC with the NX as a thin
@@ -39,10 +43,12 @@ checkpoint fast, then spend the real effort on edge deployment and latency engin
 
 ## Impact
 
-- **Code**: `src/smolvla_edge/{infer,eval,bench,common}.py`, `scripts/train.sh`,
-  `scripts/make_demo_gif.py`, `configs/train.so101_pickplace.yaml`,
-  `deploy/ondevice/`, `deploy/client_server/` (proto + server + client), `benchmarks/collate.py`.
-- **Dependencies**: LeRobot pinned to `v0.5.0` (`lerobot[smolvla]`), ffmpeg/torchcodec on the
-  dev box; NVIDIA aarch64 torch + JetPack CUDA/cuDNN/TensorRT on the Xavier NX.
+- **Code**: `src/smolvla_edge/{infer,eval,bench,common}.py` (`eval.py` implements the gym-aloha
+  closed-loop rollout), `scripts/train.sh`, `scripts/make_demo_gif.py`,
+  `configs/train.aloha_sim.yaml` (+ `configs/train.so101_pickplace.yaml` kept for the future
+  real-robot path), `deploy/ondevice/`, `deploy/client_server/`, `benchmarks/collate.py`.
+- **Dependencies**: LeRobot pinned to `v0.5.0` (`lerobot[smolvla]`), `gym-aloha` + MuJoCo
+  (`MUJOCO_GL=egl` on headless boxes), ffmpeg/torchcodec on the dev box; NVIDIA aarch64 torch +
+  JetPack CUDA/cuDNN/TensorRT on the Xavier NX (only if the optional edge phase is done).
 - **Docs**: `docs/` is removed; its content now lives in this change's proposal/design/tasks.
   `README.md` links are updated to point at `openspec/` instead of `docs/`.

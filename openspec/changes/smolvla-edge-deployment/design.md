@@ -1,10 +1,11 @@
 ## Context
 
 SmolVLA is a SmolVLM-2 backbone plus a flow-matching action expert, pretrained on SO-100/SO-101
-manipulation data. The deliverable is a demo: a correct checkpoint plus a credible edge-deployment
-and latency story on a Jetson Xavier NX (8 GB) that is already on hand. No robot arm and no new
-hardware are required — fine-tuning uses public Hugging Face datasets, eval runs on replayed /
-held-out episodes, and deployment targets the NX.
+manipulation data. The deliverable is a demo: a correct checkpoint (fine-tuned + evaluated
+**entirely in simulation**, since no robot is on hand) plus — optionally, if a Jetson is available —
+a credible edge-deployment and latency story on a Xavier NX (8 GB). No robot arm and no new hardware
+are required for the correctness half: fine-tuning uses a public Hugging Face ALOHA sim dataset, and
+eval runs **closed-loop in the gym-aloha MuJoCo env** (its success flag is the quoted number).
 
 Hardware in play:
 - **Dev + inference**: Titan X (Maxwell, 12 GB, pre-Tensor-core).
@@ -20,13 +21,15 @@ run there.
 ## Goals / Non-Goals
 
 **Goals:**
-- A *correct* fine-tuned SO-101 pick-and-place checkpoint with a held-out success-rate number,
-  reached fast so effort can shift to edge work.
-- The policy running entirely on the Xavier NX under real-time constraints, with an honest
-  accounting of what converted to a faster engine and what didn't.
-- A reproducible cross-tier latency/throughput/memory table plus a short demo GIF.
-- A second deployment point (workstation gRPC server + NX client) that mirrors how real robots
-  offload heavy inference.
+- A *correct* fine-tuned ALOHA-sim checkpoint with a **closed-loop** success-rate number from
+  gym-aloha rollouts, reached with **no robot** so the correctness half always ships.
+- *(Optional, if a Jetson NX is on hand)* the policy running entirely on the Xavier NX under
+  real-time constraints, with an honest accounting of what converted to a faster engine and what
+  didn't.
+- A reproducible latency/throughput/memory table (local GPU always; NX tiers when available) plus
+  a short demo GIF built from ALOHA sim frames.
+- *(Optional)* a second deployment point (workstation gRPC server + thin control client) that
+  mirrors how real robots offload heavy inference.
 
 **Non-Goals:**
 - **Mobile-rover embodiment.** The on-hand rover is an Ackermann/mobile base, not an arm. SmolVLA's
@@ -40,9 +43,23 @@ run there.
 
 ## Decisions
 
-**Fine-tune, don't train from scratch.** SmolVLA is pretrained on SO-100/SO-101, so a public
-SO-101 dataset (`lerobot/svla_so101_pickplace`) is the turnkey path to a correct checkpoint.
-Alternative (rover / from-scratch) rejected as out of scope above.
+**Evaluate in simulation (gym-aloha), not on a robot or in Isaac Sim / Gazebo.** With no arm on
+hand, the correctness loop needs a simulator that plugs into LeRobot's dataset/policy API. The
+turnkey choice is **gym-aloha**, a LeRobot-native MuJoCo env with ready datasets
+(`lerobot/aloha_sim_insertion_human`) and a first-class success flag — it wires straight into
+`smolvla_edge.eval --mode sim`. *Isaac Sim / Gazebo were rejected:* neither is integrated with
+LeRobot's observation/action schema, so they'd require hand-building the obs bridge, camera
+rendering, and a matching dataset (weeks of plumbing, plus Omniverse/ROS overhead) for zero
+leverage on a train→eval→demo loop. *LIBERO / Meta-World* (the SmolVLA paper's sim benchmarks) are
+a stretch goal — more impressive but not turnkey in LeRobot v0.5.0 (undocumented wiring). Trade-off
+accepted: ALOHA is bimanual (14-D action) rather than the SO-101 embodiment SmolVLA was pretrained
+on, so the fine-tune adapts the state/action projectors; the obs→policy key mapping in
+`eval._aloha_obs_to_batch` must be verified against `policy.config.input_features` on the dev box.
+
+**Fine-tune, don't train from scratch.** SmolVLA is pretrained on manipulation data, so fine-tuning
+from `lerobot/smolvla_base` on the ALOHA sim dataset (`lerobot/aloha_sim_insertion_human`) is the
+turnkey path to a correct checkpoint. The real SO-101 path (`configs/train.so101_pickplace.yaml`)
+is kept for when a robot is available. Alternative (rover / from-scratch) rejected as out of scope.
 
 **Smoke-test before training anything.** Run `smolvla_edge.infer` on `lerobot/smolvla_base`
 against the dataset first, so stack/version problems surface before burning rented-GPU hours.
