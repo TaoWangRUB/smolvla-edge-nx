@@ -26,21 +26,26 @@ from .common import (
 )
 
 
-def maybe_cast(policy, precision: str):
-    """Cast the policy to the requested precision where the graph allows.
+def maybe_cast(precision: str, device: str):
+    """Return an inference context manager for the requested precision.
 
-    fp16/bf16 are straightforward `.half()`/`.bfloat16()`. INT8 is intentionally NOT done
-    here via a naive cast — real INT8 goes through TensorRT/quantization on the parts of the
-    graph that convert (see deploy/ondevice/). This keeps the benchmark honest.
+    fp16/bf16 use torch.autocast (AMP): weights stay fp32, matmuls/convs run in reduced
+    precision. This is both what real deployments do and robust — a blanket `.half()` breaks
+    models that create fp32 tensors internally (ACT does). INT8 is intentionally NOT done here
+    via a naive cast — real INT8 goes through TensorRT/quantization on the parts of the graph
+    that convert (see deploy/ondevice/). This keeps the benchmark honest.
     """
+    import contextlib
+
     import torch
 
     if precision == "fp32":
-        return policy
-    if precision == "fp16":
-        return policy.half()
-    if precision == "bf16":
-        return policy.to(torch.bfloat16)
+        return contextlib.nullcontext()
+    if precision in ("fp16", "bf16"):
+        if not device.startswith("cuda"):
+            raise SystemExit(f"{precision} autocast benchmarking requires a CUDA device")
+        dtype = torch.float16 if precision == "fp16" else torch.bfloat16
+        return torch.autocast(device_type="cuda", dtype=dtype)
     if precision == "int8":
         raise SystemExit(
             "INT8 is not a plain cast for this VLA. Build a quantized/TensorRT engine in "
@@ -53,35 +58,26 @@ def run(args) -> dict:
     import torch
 
     policy, device = load_policy(args.policy_path, args.device)
-    policy = maybe_cast(policy, args.precision)
+    autocast_ctx = maybe_cast(args.precision, device)
     reset_gpu_memory_stats(device)
 
     ds = load_dataset(args.dataset_repo_id, episodes=list(range(args.episodes)))
     timer = Timer(device=device)
-
-    cast_dtype = {
-        "fp32": torch.float32,
-        "fp16": torch.float16,
-        "bf16": torch.bfloat16,
-    }.get(args.precision, torch.float32)
 
     # Warmup (excluded from stats) — first calls JIT/allocate and would skew p95.
     policy.reset()
     n_total = min(len(ds), args.steps + args.warmup)
     for i in range(n_total):
         frame = ds[i]
-        batch = {}
-        for k, v in frame.items():
-            if isinstance(v, torch.Tensor):
-                v = v.to(device).unsqueeze(0)
-                if v.is_floating_point():
-                    v = v.to(cast_dtype)
-            batch[k] = v
+        batch = {
+            k: (v.to(device).unsqueeze(0) if isinstance(v, torch.Tensor) else v)
+            for k, v in frame.items()
+        }
         if i < args.warmup:
-            with torch.no_grad():
+            with torch.no_grad(), autocast_ctx:
                 policy.select_action(batch)
             continue
-        with torch.no_grad(), timer.section("select_action"):
+        with torch.no_grad(), autocast_ctx, timer.section("select_action"):
             policy.select_action(batch)
 
     stats = timer.summary().get("select_action", {})

@@ -18,7 +18,7 @@ from __future__ import annotations
 
 import argparse
 
-from .common import Timer, load_dataset, load_policy
+from .common import Timer, load_dataset, load_policy, make_language_tokenizer
 
 
 def main() -> None:
@@ -40,6 +40,20 @@ def main() -> None:
     print(f"[infer] loading dataset: {args.dataset_repo_id}")
     ds = load_dataset(args.dataset_repo_id, episodes=list(range(args.episodes)))
 
+    # Map the dataset's image keys onto the policy's expected image features when the names
+    # differ (e.g. smolvla_base expects observation.images.camera1/2/3; the SO-101 dataset
+    # ships observation.images.up/.side). Order-based, logged — good enough for a smoke test.
+    key_map: dict[str, str] = {}
+    img_feats = sorted(getattr(policy.config, "image_features", []) or [])
+    ds_img_keys = sorted(k for k in ds[0] if "image" in k.lower())
+    if img_feats and not any(k in ds_img_keys for k in img_feats):
+        key_map = dict(zip(ds_img_keys, img_feats))
+        print(f"[infer] remapping dataset image keys -> policy features: {key_map}")
+
+    # Language-conditioned policies (SmolVLA) read pre-tokenized language from the batch;
+    # tokenize the dataset's task string with the policy's own VLM tokenizer.
+    tokenize = make_language_tokenizer(policy, device)
+
     timer = Timer(device=device)
     n = 0
     policy.reset()
@@ -47,9 +61,12 @@ def main() -> None:
         frame = ds[i]
         # Move tensors to the policy device; pass through non-tensors untouched.
         batch = {
-            k: (v.to(device).unsqueeze(0) if isinstance(v, torch.Tensor) else v)
+            key_map.get(k, k): (v.to(device).unsqueeze(0) if isinstance(v, torch.Tensor) else v)
             for k, v in frame.items()
         }
+        if tokenize is not None:
+            task = frame.get("task") or "do the task"
+            batch.update(tokenize(task if isinstance(task, str) else str(task)))
         with torch.no_grad(), timer.section("select_action"):
             action = policy.select_action(batch)
         n += 1

@@ -1,0 +1,3 @@
+tag,device,precision,chunking,steps_measured,latency_mean_ms,latency_p95_ms,rtt_mean_ms,rtt_p95_ms,server_compute_mean_ms,network_overhead_mean_ms,throughput_hz,peak_gpu_mem_mb
+local-2000ada-act-fp16,cuda,fp16,on,100,0.693,0.869,,,,,1443.872,271.8
+local-2000ada-act-fp32,cuda,fp32,on,100,0.679,0.713,,,,,1473.82,266.2

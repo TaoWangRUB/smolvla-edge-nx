@@ -9,7 +9,7 @@
 
 ## 2. Correctness — verify in sim, then fine-tune (Phase 1)
 
-- [ ] 2.1 Smoke-test the stack: `python -m smolvla_edge.infer --policy-path lerobot/smolvla_base --dataset-repo-id lerobot/svla_so101_pickplace` (base is SO-101 embodiment — pair accordingly)
+- [x] 2.1 Smoke-test the stack: `docker compose run --rm infer` — smolvla_base ran 100 steps on the SO-101 dataset (6-D actions; select_action p50 2.7 ms / mean 12.6 ms incl. VLM prefill at chunk boundaries). Needed: dataset→policy image-key remap + external language tokenization (lerobot 0.4.x has no processor pipeline) — now built into `infer.py`/`common.py`
 - [x] 2.2 **Verify-first (no fine-tune):** pretrained checkpoints run through the harness end-to-end. Transfer cube: **3/5 = 60% success** (`lerobot/act_aloha_sim_transfer_cube_human`, the positive baseline). Insertion: 0/3, grasps only (reward 2/4) — mujoco 2.x→3.10 sim-version gap (see design "Simulation setup"). Reproduce: `docker compose run --rm verify`
 - [x] 2.2b Re-ran verify inside the Docker image (matched mujoco 2.3.7): transfer cube **4/5 = 80%** (vs 60% on host mujoco 3.10 — the sim-version gap measured directly). Insertion: still 0/5 in-container (mean max reward 2.2, one episode reached 3/4) — matched mujoco helps but doesn't recover the published ~50% at 5 episodes; likely needs more episodes and/or ACT temporal-ensembling settings.
 - [ ] 2.3 Fine-tune SmolVLA on the ALOHA dataset: `bash scripts/train.sh` (uses `configs/train.aloha_sim.yaml`; A100/H100, or Titan X slower)
@@ -28,10 +28,10 @@
 
 ## 4. Benchmarks + writeup (Phase 3)
 
-- [ ] 4.1 Produce the results rows across available tiers (local GPU always; NX FP16/INT8 ±chunking and client/server only if a Jetson is on hand)
-- [ ] 4.2 Capture metrics: end-to-end latency, action-chunk frequency, throughput, peak memory
-- [ ] 4.3 Collate raw JSON → `results/summary.csv` + markdown table via `benchmarks/collate.py`
-- [ ] 4.4 Build the demo GIF from the ALOHA sim dataset frames via `scripts/make_demo_gif.py`
+- [ ] 4.1 Produce the results rows across available tiers — **local-GPU tier done** (RTX 2000 Ada, pretrained ACT: fp32 0.68 ms/1474 Hz/266 MB; fp16-autocast 0.69 ms/1444 Hz — parity: tiny model is overhead-bound). NX tiers pending hardware; SmolVLA rows pending the fine-tune
+- [ ] 4.2 Capture metrics: end-to-end latency, throughput, peak memory ✔ (in bench.py rows); action-chunk frequency still to add
+- [x] 4.3 Collate raw JSON → `results/summary.csv` + markdown table via `benchmarks/collate.py` (verified in-container, 2 rows)
+- [x] 4.4 Build the demo GIF from the ALOHA sim dataset frames via `scripts/make_demo_gif.py` → `benchmarks/results/demo.gif` (120 frames @ 15 fps)
 - [ ] 4.5 Write the README narrative: "Fine-tuning SmolVLA in sim, and deploying a flow-matching VLA on 8 GB edge hardware"
 
 ## 5. Docs migration
