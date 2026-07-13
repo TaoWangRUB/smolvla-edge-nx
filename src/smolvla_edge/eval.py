@@ -184,6 +184,76 @@ def _load_normalizers(policy, policy_path: str, device: str):
     return (lambda b: b), (lambda a: a)
 
 
+def _batchify_obs(obs: dict):
+    """Add a leading batch axis to a single gym observation (mimics a 1-env vector env)."""
+    import numpy as np
+
+    out = {}
+    for k, v in obs.items():
+        if isinstance(v, dict):
+            out[k] = {kk: np.asarray(vv)[None] for kk, vv in v.items()}
+        else:
+            out[k] = np.asarray(v)[None]
+    return out
+
+
+def make_sim_stepper(policy, policy_path: str, device: str, task: str | None):
+    """Return step_fn(obs) -> np action, handling checkpoint-format differences in one place.
+
+    1. **Pipeline mode** (fresh lerobot 0.4.x/0.5.x checkpoints, e.g. your fine-tuned SmolVLA):
+       the checkpoint ships a saved processor pipeline that does key-renaming, batching, task
+       tokenization, device placement and normalization. We mirror lerobot_eval exactly:
+       preprocess_observation -> pre() -> select_action -> post().
+    2. **Manual mode** (old hub checkpoints without processor files, e.g. the pretrained ACT
+       baselines): hand-built obs mapping + stats recovered by `_load_normalizers`, plus manual
+       language tokenization for language-conditioned policies.
+    """
+    import torch
+
+    from .common import resolve_policy_path
+
+    policy_path = resolve_policy_path(policy_path)
+
+    try:
+        from lerobot.envs.utils import preprocess_observation
+        from lerobot.policies.factory import make_pre_post_processors
+
+        pre, post = make_pre_post_processors(
+            policy_cfg=policy.config,
+            pretrained_path=policy_path,
+            preprocessor_overrides={"device_processor": {"device": device}},
+        )
+
+        def step_pipeline(obs):
+            o = preprocess_observation(_batchify_obs(obs))
+            if task:
+                o["task"] = [task]
+            o = pre(o)
+            with torch.no_grad():
+                action = policy.select_action(o)
+            return post(action).squeeze(0).float().cpu().numpy()
+
+        print("[eval] stepper: saved processor pipeline (rename/tokenize/normalize)")
+        return step_pipeline
+    except Exception as e:
+        print(f"[eval] no processor pipeline ({type(e).__name__}); using manual obs mapping")
+
+    normalize_obs, unnormalize_action = _load_normalizers(policy, policy_path, device)
+    from .common import make_language_tokenizer
+
+    tokenize = make_language_tokenizer(policy, device)
+
+    def step_manual(obs):
+        batch = normalize_obs(_aloha_obs_to_batch(obs, device, task))
+        if tokenize is not None:
+            batch.update(tokenize(task or "do the task"))
+        with torch.no_grad():
+            action = unnormalize_action(policy.select_action(batch))
+        return action.squeeze(0).float().cpu().numpy()
+
+    return step_manual
+
+
 def eval_sim(
     policy,
     policy_path: str,
@@ -205,9 +275,8 @@ def eval_sim(
     """
     import gymnasium as gym
     import gym_aloha  # noqa: F401  # registers the gym_aloha/* env ids
-    import torch
 
-    normalize_obs, unnormalize_action = _load_normalizers(policy, policy_path, device)
+    stepper = make_sim_stepper(policy, policy_path, device, task or None)
     env = gym.make(env_id, obs_type=obs_type, render_mode="rgb_array")
     successes = 0
     max_rewards: list[float] = []
@@ -217,10 +286,7 @@ def eval_sim(
             policy.reset()
             ep_max_r = 0.0
             for _ in range(max_steps):
-                batch = normalize_obs(_aloha_obs_to_batch(obs, device, task))
-                with torch.no_grad():
-                    action = unnormalize_action(policy.select_action(batch))
-                act_np = action.squeeze(0).float().cpu().numpy()
+                act_np = stepper(obs)
                 obs, reward, terminated, truncated, _ = env.step(act_np)
                 ep_max_r = max(ep_max_r, float(reward))
                 if terminated or truncated:
