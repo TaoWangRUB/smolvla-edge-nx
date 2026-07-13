@@ -19,6 +19,7 @@ frames @ 50 fps), and --stride to keep the GIF small and ~real-time.
 from __future__ import annotations
 
 import argparse
+import time
 from pathlib import Path
 
 
@@ -54,8 +55,13 @@ def frames_replay(args) -> list:
 CONTROL_HZ = 50  # gym-aloha control/render rate (dt = 20 ms)
 
 
-def _overlay(frame_np, step: int, reward: float, success: bool):
-    """Stamp sim time / control rate / reward status onto a frame (returns np.uint8 HWC)."""
+def _overlay(frame_np, step: int, reward: float, success: bool, lat_ms: float):
+    """Stamp sim time / control rate / policy latency / reward onto a frame (np.uint8 HWC).
+
+    The latency is that step's `select_action` wall time (CUDA-synced). With action chunking
+    most steps pop from the policy's internal queue (~0 ms); the spikes are chunk refills —
+    the decoupled predict/execute behavior the edge deployment leans on.
+    """
     import numpy as np
     from PIL import Image, ImageDraw
 
@@ -65,7 +71,7 @@ def _overlay(frame_np, step: int, reward: float, success: bool):
         from pathlib import Path
 
         ttf = Path(matplotlib.get_data_path()) / "fonts/ttf/DejaVuSans-Bold.ttf"
-        font = ImageFont.truetype(str(ttf), 18)
+        font = ImageFont.truetype(str(ttf), 17)
     except Exception:
         font = None
 
@@ -73,7 +79,8 @@ def _overlay(frame_np, step: int, reward: float, success: bool):
     draw = ImageDraw.Draw(img, "RGBA")
     t_sim = step / CONTROL_HZ
     status = "SUCCESS" if success else f"reward {reward:.0f}/4"
-    text = f"sim t = {t_sim:5.2f} s   |   {CONTROL_HZ} Hz control   |   {status}"
+    text = (f"sim t {t_sim:5.2f} s  |  {CONTROL_HZ} Hz  |  "
+            f"policy {lat_ms:5.1f} ms  |  {status}")
     draw.rectangle([0, 0, img.width, 30], fill=(0, 0, 0, 160))
     draw.text((8, 6), text, fill=(255, 255, 255), font=font)
     return np.asarray(img)
@@ -97,18 +104,33 @@ def frames_rollout(args) -> list:
     normalize_obs, unnormalize_action = _load_normalizers(policy, args.policy_path, device)
     env = gym.make(args.env_id, obs_type="pixels_agent_pos", render_mode="rgb_array")
 
-    best: list = []  # (frame, step, reward, success_so_far)
+    def _sync():
+        if device.startswith("cuda"):
+            torch.cuda.synchronize()
+
+    best: list = []  # (frame, step, reward, success_so_far, lat_ms)
     best_reward = -1.0
     try:
+        # Warmup: the first CUDA call pays kernel-compile/autotune costs (~hundreds of ms),
+        # which would show up as a bogus "policy latency" on frame 0 of the overlay.
+        obs, _ = env.reset(seed=0)
+        with torch.no_grad():
+            policy.select_action(normalize_obs(_aloha_obs_to_batch(obs, device, args.task or None)))
+        _sync()
+
         for seed in range(args.max_tries):
             obs, _ = env.reset(seed=seed)
             policy.reset()
             recs, ep_max_r, post = [], 0.0, None
             for step in range(args.max_steps + args.post_steps):
-                recs.append((env.render(), step, ep_max_r, ep_max_r >= 4.0))
                 batch = normalize_obs(_aloha_obs_to_batch(obs, device, args.task or None))
+                _sync()
+                t0 = time.perf_counter()
                 with torch.no_grad():
                     action = unnormalize_action(policy.select_action(batch))
+                _sync()
+                lat_ms = (time.perf_counter() - t0) * 1e3
+                recs.append((env.render(), step, ep_max_r, ep_max_r >= 4.0, lat_ms))
                 obs, reward, terminated, truncated, _ = env.step(
                     action.squeeze(0).float().cpu().numpy()
                 )
@@ -135,8 +157,8 @@ def frames_rollout(args) -> list:
 
     kept = best[:: args.stride]
     frames = [
-        _overlay(to_uint8_hwc(f), step, r, ok) if args.overlay else to_uint8_hwc(f)
-        for f, step, r, ok in kept
+        _overlay(to_uint8_hwc(f), step, r, ok, lat) if args.overlay else to_uint8_hwc(f)
+        for f, step, r, ok, lat in kept
     ]
     # Freeze the final frame so the end state is readable before the GIF loops.
     if frames and args.hold > 0:
