@@ -9,9 +9,9 @@ part most tutorials skip.
 > under real-time, on-device, 8 GB edge constraints — and being honest about *what converts,
 > what doesn't, and the latency budget you hit anyway.*
 
-No robot arm and no new hardware required: SmolVLA fine-tunes from public Hugging Face
-datasets, eval runs on replayed/held-out episodes, and deployment targets a Xavier NX that's
-already on hand.
+No robot arm required: SmolVLA fine-tunes from public Hugging Face datasets, and evaluation
+runs **closed-loop in the gym-aloha MuJoCo simulator** (plus open-loop replay as a fallback).
+The Xavier NX edge phase is fully specced and kicks in whenever a Jetson is on hand.
 
 ---
 
@@ -28,8 +28,12 @@ edge deployment and latency engineering.
 
 ## Track scope
 
-- **In scope — manipulation (SO-101).** SmolVLA is pretrained on SO-100/SO-101 manipulation
-  data, so a public SO-101 dataset is the turnkey path to a correct checkpoint.
+- **In scope — manipulation in simulation (ALOHA sim).** With no robot on hand, the correctness
+  loop runs entirely in the LeRobot-native gym-aloha MuJoCo env: fine-tune on
+  `lerobot/aloha_sim_insertion_human`, evaluate **closed-loop** with the env's own success flag.
+  The real SO-101 path (`configs/train.so101_pickplace.yaml`) is kept for when hardware exists.
+- **Optional — Jetson Xavier NX edge deployment.** Kept fully specced (Phase 2) but parked until
+  a Jetson is on hand.
 - **Future work — mobile rover.** A rover is a different embodiment (mobile base, not an arm).
   Adapting SmolVLA to it is a research project, not a two-week demo. See the *Non-Goals* in
   [the change design](openspec/changes/smolvla-edge-deployment/design.md).
@@ -38,14 +42,20 @@ edge deployment and latency engineering.
 
 ## Roadmap
 
+Progress: **12 / 25 tasks** — details in
+[the change tasks](openspec/changes/smolvla-edge-deployment/tasks.md).
+
 | Phase | What | Status | Notes |
 |-------|------|--------|-------|
-| 0 | **Scaffold** — repo, MIT license, pinned LeRobot, env on Titan X | ☐ | `pip install "lerobot[smolvla]"` + ffmpeg/torchcodec |
-| 1 | **Correctness** — validate stack with base-model inference, then fine-tune | ☐ | `lerobot/smolvla_base` → `lerobot/svla_so101_pickplace`, 20k steps |
-| 2 | **Edge deployment** (the differentiator) — on-device + client/server | ☐ | Xavier NX 8 GB; chunking, low-Hz VLM, INT8 where the graph converts |
-| 3 | **Benchmarks + writeup** (the centerpiece) — latency table + video | ☐ | Titan X vs NX (FP16/INT8, ±chunking) vs NX-client/workstation-server |
+| 0 | **Scaffold + environment** — repo, pins, host env, **Docker env** | ✅ 6/6 | matched-mujoco container built & verified; showcase task = ALOHA sim insertion |
+| 1 | **Correctness (sim)** — verify-first, then fine-tune SmolVLA + closed-loop eval | 🔄 2/5 | ✅ verify-first: pretrained ACT **80 %** transfer-cube in-container (60 % on host mujoco 3.x). ⬜ fine-tune (needs a big GPU) → eval → success-rate deliverable |
+| 2 | **Edge deployment** (optional) — Xavier NX on-device + client/server | ⏸ 0/7 | parked until a Jetson NX is on hand; chunking, low-Hz VLM, INT8-where-it-converts |
+| 3 | **Benchmarks + writeup** — latency table + demo GIF + narrative | ⬜ 0/5 | local-GPU tier + demo GIF runnable now; narrative needs the fine-tune numbers |
 
-Track progress in [the change tasks](openspec/changes/smolvla-edge-deployment/tasks.md).
+**Verified so far:** the full sim/eval pipeline works end-to-end with pretrained checkpoints
+(`docker compose run --rm verify`), and the matched-simulator container measurably matters
+(80 % vs 60 % on the same checkpoint). The remaining critical path is one GPU fine-tune
+(~4 h on an A100) and the evaluation + writeup that follow from it.
 
 ---
 
