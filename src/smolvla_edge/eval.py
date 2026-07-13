@@ -8,7 +8,13 @@ Two eval styles are supported, in order of fidelity:
    action-prediction agreement (MSE / threshold accuracy) against logged actions. Cheap, but a
    proxy — label it as such in the writeup.
 
-    # closed-loop success rate in simulation (the deliverable):
+    # VERIFY-FIRST (no fine-tune): run a pretrained policy already trained on ALOHA sim through
+    # the harness to confirm env + rollout + obs-mapping work and get a baseline success rate.
+    python -m smolvla_edge.eval \
+        --policy-path lerobot/act_aloha_sim_insertion_human \
+        --mode sim --env-id gym_aloha/AlohaInsertion-v0 --episodes 20 --task ""
+
+    # closed-loop success rate for YOUR fine-tuned SmolVLA (the deliverable):
     python -m smolvla_edge.eval \
         --policy-path outputs/train/smolvla_aloha/checkpoints/last \
         --mode sim --env-id gym_aloha/AlohaInsertion-v0 --episodes 20
@@ -70,8 +76,12 @@ IMAGE_KEY = "observation.images.top"
 STATE_KEY = "observation.state"
 
 
-def _aloha_obs_to_batch(obs: dict, task: str, device: str) -> dict:
-    """Map one gym-aloha observation dict to a batched SmolVLA input dict."""
+def _aloha_obs_to_batch(obs: dict, device: str, task: str | None = None) -> dict:
+    """Map one gym-aloha observation dict to a batched policy input dict.
+
+    `task` is included only for language-conditioned policies (SmolVLA). Pass task=None/"" for
+    ACT/diffusion checkpoints, which have no language input.
+    """
     import numpy as np
     import torch
 
@@ -84,11 +94,13 @@ def _aloha_obs_to_batch(obs: dict, task: str, device: str) -> dict:
     state_np = obs.get("agent_pos", obs.get("qpos"))
     state = torch.from_numpy(np.asarray(state_np, dtype=np.float32))
 
-    return {
+    batch = {
         IMAGE_KEY: img.unsqueeze(0).to(device),
         STATE_KEY: state.unsqueeze(0).to(device),
-        "task": [task],  # SmolVLA is language-conditioned; one instruction per batch element
     }
+    if task:
+        batch["task"] = [task]  # one instruction per batch element
+    return batch
 
 
 def eval_sim(
@@ -122,7 +134,7 @@ def eval_sim(
             policy.reset()
             ep_max_r = 0.0
             for _ in range(max_steps):
-                batch = _aloha_obs_to_batch(obs, task, device)
+                batch = _aloha_obs_to_batch(obs, device, task)
                 with torch.no_grad():
                     action = policy.select_action(batch)
                 act_np = action.squeeze(0).float().cpu().numpy()
@@ -160,10 +172,16 @@ def main() -> None:
     ap.add_argument("--env-id", default="gym_aloha/AlohaInsertion-v0", help="(sim) gym env id")
     ap.add_argument("--task", default="insert the peg into the socket", help="(sim) instruction")
     ap.add_argument("--obs-type", default="pixels_agent_pos", help="(sim) gym-aloha obs_type")
+    ap.add_argument(
+        "--policy-type",
+        default="auto",
+        help="auto-detect from the checkpoint, or force smolvla/act/diffusion/... "
+        "(use act/diffusion to verify the harness with a pretrained ALOHA policy)",
+    )
     ap.add_argument("--device", default="auto")
     args = ap.parse_args()
 
-    policy, device = load_policy(args.policy_path, args.device)
+    policy, device = load_policy(args.policy_path, args.device, args.policy_type)
 
     if args.mode == "sim":
         result = eval_sim(

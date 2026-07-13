@@ -26,19 +26,74 @@ def select_device(requested: str = "auto") -> str:
     return "cpu"
 
 
-def load_policy(policy_path: str, device: str = "auto"):
-    """Load a SmolVLA policy from a local checkpoint dir or a HF hub repo id.
+# Fallback map of LeRobot policy `type` -> (module, class), used only if the official
+# factory import fails. Both are version-sensitive; the `type` field lives in a checkpoint's
+# config.json and is stable across LeRobot releases.
+_POLICY_CLASS_BY_TYPE = {
+    "smolvla": ("lerobot.policies.smolvla.modeling_smolvla", "SmolVLAPolicy"),
+    "act": ("lerobot.policies.act.modeling_act", "ACTPolicy"),
+    "diffusion": ("lerobot.policies.diffusion.modeling_diffusion", "DiffusionPolicy"),
+    "pi0": ("lerobot.policies.pi0.modeling_pi0", "PI0Policy"),
+    "vqbet": ("lerobot.policies.vqbet.modeling_vqbet", "VQBeTPolicy"),
+    "tdmpc": ("lerobot.policies.tdmpc.modeling_tdmpc", "TDMPCPolicy"),
+}
+
+
+def _detect_policy_type(policy_path: str) -> str | None:
+    """Read the policy `type` from a checkpoint dir or HF repo `config.json`."""
+    import json
+    from pathlib import Path
+
+    local = Path(policy_path) / "config.json"
+    if local.exists():
+        return json.loads(local.read_text()).get("type")
+    try:  # hub repo id -> pull just the config
+        from huggingface_hub import hf_hub_download
+
+        cfg = hf_hub_download(policy_path, "config.json")
+        return json.loads(Path(cfg).read_text()).get("type")
+    except Exception:
+        return None
+
+
+def _get_policy_class(policy_type: str):
+    """Resolve a LeRobot policy class, preferring the official factory."""
+    try:
+        from lerobot.policies.factory import get_policy_class
+
+        return get_policy_class(policy_type)
+    except Exception:
+        import importlib
+
+        if policy_type not in _POLICY_CLASS_BY_TYPE:
+            raise SystemExit(
+                f"unknown policy type {policy_type!r}; known: {sorted(_POLICY_CLASS_BY_TYPE)}"
+            )
+        mod, cls = _POLICY_CLASS_BY_TYPE[policy_type]
+        return getattr(importlib.import_module(mod), cls)
+
+
+def load_policy(policy_path: str, device: str = "auto", policy_type: str = "auto"):
+    """Load ANY LeRobot policy from a local checkpoint dir or a HF hub repo id.
+
+    Auto-detects the policy class from the checkpoint's config (`type`), so you can load a
+    pretrained SmolVLA (`lerobot/smolvla_base`) OR a pretrained ACT/diffusion checkpoint trained
+    on a sim env (e.g. `lerobot/act_aloha_sim_insertion_human`) to verify the sim/eval harness
+    with no fine-tuning.
 
     Args:
-        policy_path: e.g. "lerobot/smolvla_base" or "outputs/train/.../checkpoints/last".
+        policy_path: e.g. "lerobot/smolvla_base", "lerobot/act_aloha_sim_insertion_human", or a
+            local "outputs/train/.../checkpoints/last".
         device: torch device string or "auto".
+        policy_type: "auto" to read it from the checkpoint config, or force one of
+            smolvla/act/diffusion/pi0/vqbet/tdmpc.
     """
-    from lerobot.policies.smolvla.modeling_smolvla import SmolVLAPolicy
-
     dev = select_device(device)
-    policy = SmolVLAPolicy.from_pretrained(policy_path)
+    ptype = policy_type if policy_type != "auto" else (_detect_policy_type(policy_path) or "smolvla")
+    policy = _get_policy_class(ptype).from_pretrained(policy_path)
     policy.to(dev)
     policy.eval()
+    print(f"[load_policy] loaded '{policy_path}' as policy type '{ptype}'")
     return policy, dev
 
 
