@@ -4,12 +4,14 @@
 - [x] 1.2 README skeleton with the narrative
 - [x] 1.3 Pin LeRobot v0.5.0 in `requirements.txt`
 - [x] 1.4 Create env on the dev box: LeRobot 0.5.0 + mujoco 3.10 + dm_control 1.0.43 + gym-aloha installed & verified (py3.12 needs the workaround in `scripts/setup_sim.sh`; headless via `MUJOCO_GL=egl`)
+- [x] 1.6 Dockerized environment (preferred path): `docker/Dockerfile` + `docker-compose.yml` — CUDA torch base (py3.11 → matched mujoco 2.3.7), repo at `/workspace`, nvidia runtime + EGL, HF-cache volume, services `verify`/`eval`/`infer`/`train`/`bench`/`shell`
 - [x] 1.5 Confirm the showcase task — **ALOHA sim insertion** (`gym_aloha/AlohaInsertion-v0`, dataset `lerobot/aloha_sim_insertion_human`). Chosen so the correctness loop runs with **no robot**; real SO-101 is out of scope for now (no hardware). See `configs/train.aloha_sim.yaml`.
 
 ## 2. Correctness — verify in sim, then fine-tune (Phase 1)
 
 - [ ] 2.1 Smoke-test the stack: `python -m smolvla_edge.infer --policy-path lerobot/smolvla_base --dataset-repo-id lerobot/svla_so101_pickplace` (base is SO-101 embodiment — pair accordingly)
-- [x] 2.2 **Verify-first (no fine-tune):** ran pretrained `lerobot/act_aloha_sim_insertion_human` through the harness — env + rollout + obs mapping + normalization all work. Policy reliably **grasps** (reward ~2/4); 0% full insertion due to the mujoco 2.x→3.10 sim-version gap (see design "Simulation setup"). Command: `MUJOCO_GL=egl python -m smolvla_edge.eval --mode sim --policy-path lerobot/act_aloha_sim_insertion_human --episodes 20 --task ""`
+- [x] 2.2 **Verify-first (no fine-tune):** pretrained checkpoints run through the harness end-to-end. Transfer cube: **3/5 = 60% success** (`lerobot/act_aloha_sim_transfer_cube_human`, the positive baseline). Insertion: 0/3, grasps only (reward 2/4) — mujoco 2.x→3.10 sim-version gap (see design "Simulation setup"). Reproduce: `docker compose run --rm verify`
+- [x] 2.2b Re-ran verify inside the Docker image (matched mujoco 2.3.7): transfer cube **4/5 = 80%** (vs 60% on host mujoco 3.10 — the sim-version gap measured directly). Insertion number pending more episodes.
 - [ ] 2.3 Fine-tune SmolVLA on the ALOHA dataset: `bash scripts/train.sh` (uses `configs/train.aloha_sim.yaml`; A100/H100, or Titan X slower)
 - [ ] 2.4 Verify the obs→policy key mapping in `smolvla_edge.eval._aloha_obs_to_batch` against your checkpoint's `policy.config.input_features` (largely settled once 2.2 passes)
 - [ ] 2.5 Evaluate the fine-tuned SmolVLA closed-loop → success-rate number (deliverable): `python -m smolvla_edge.eval --mode sim --policy-path outputs/train/smolvla_aloha/checkpoints/last --env-id gym_aloha/AlohaInsertion-v0 --episodes 20`

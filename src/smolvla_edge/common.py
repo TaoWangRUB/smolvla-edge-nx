@@ -57,20 +57,30 @@ def _detect_policy_type(policy_path: str) -> str | None:
 
 
 def _get_policy_class(policy_type: str):
-    """Resolve a LeRobot policy class, preferring the official factory."""
-    try:
-        from lerobot.policies.factory import get_policy_class
+    """Resolve a LeRobot policy class, preferring the official factory.
 
-        return get_policy_class(policy_type)
-    except Exception:
-        import importlib
+    Tries both module layouts: `lerobot.policies.*` (>=0.5.0-era) and
+    `lerobot.common.policies.*` (<=0.4.x, used inside the Docker image).
+    """
+    import importlib
 
-        if policy_type not in _POLICY_CLASS_BY_TYPE:
-            raise SystemExit(
-                f"unknown policy type {policy_type!r}; known: {sorted(_POLICY_CLASS_BY_TYPE)}"
-            )
-        mod, cls = _POLICY_CLASS_BY_TYPE[policy_type]
-        return getattr(importlib.import_module(mod), cls)
+    for factory_mod in ("lerobot.policies.factory", "lerobot.common.policies.factory"):
+        try:
+            return importlib.import_module(factory_mod).get_policy_class(policy_type)
+        except Exception:
+            continue
+
+    if policy_type not in _POLICY_CLASS_BY_TYPE:
+        raise SystemExit(
+            f"unknown policy type {policy_type!r}; known: {sorted(_POLICY_CLASS_BY_TYPE)}"
+        )
+    mod, cls = _POLICY_CLASS_BY_TYPE[policy_type]
+    for candidate in (mod, mod.replace("lerobot.policies.", "lerobot.common.policies.")):
+        try:
+            return getattr(importlib.import_module(candidate), cls)
+        except Exception:
+            continue
+    raise SystemExit(f"could not import a policy class for type {policy_type!r}")
 
 
 def load_policy(policy_path: str, device: str = "auto", policy_type: str = "auto"):

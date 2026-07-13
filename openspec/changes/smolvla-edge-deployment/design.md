@@ -121,12 +121,18 @@ Ada, headless EGL):
    processor pipeline for 0.5.0 checkpoints and falls back to stats baked into an old checkpoint's
    `model.safetensors`. Old pretrained checkpoints (e.g. `lerobot/act_aloha_sim_insertion_human`)
    are old-format (no processor json) → the baked-in path is used.
-3. **Sim-version gap.** The HF ALOHA datasets and old checkpoints were generated with mujoco 2.x;
-   evaluating in mujoco 3.10 transfers coarse behavior (a pretrained ACT policy reliably *grasps*,
-   reward ~2/4) but not the fine bimanual insertion (0% full success in a quick check). Implication
-   for the fine-tune: train and evaluate under the **same** mujoco, or expect a train/eval gap.
-   Regenerating the dataset under mujoco 3.x, or pinning mujoco 2.x on py3.10/3.11 for both, avoids
-   it.
+3. **Sim-version gap — and the Docker fix.** The HF ALOHA datasets and old checkpoints were
+   generated with mujoco 2.x; evaluating in mujoco 3.10 transfers coarse behavior but degrades
+   fine manipulation. Measured with pretrained ACT checkpoints:
+   - insertion (precision): **0/3**, stuck at grasp (reward 2/4);
+   - transfer cube (coarser): **3/5 = 60%** success — the harness's verified positive baseline.
+   The fix is the containerized environment (`docker/Dockerfile` + `docker-compose.yml`,
+   conventions mirrored from BEV_Jetson / ackermann_rover_humble): a py3.11 image where
+   `pip install gym-aloha` resolves the **matched mujoco 2.3.7 + dm_control 1.0.14** pair the
+   checkpoints were trained under — CUDA torch base, repo mounted at `/workspace`,
+   `runtime: nvidia` + EGL for headless rendering, HF cache in a named volume, per-purpose
+   services (`verify`, `eval`, `infer`, `train`, `bench`, `shell`). Train and evaluate inside the
+   container so data generation and eval share one mujoco.
 
 ## Risks / Trade-offs
 

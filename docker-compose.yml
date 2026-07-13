@@ -1,0 +1,89 @@
+# smolvla-edge — one place for all container parameters (nvidia runtime, CUDA env,
+# /workspace mount, HF cache). Style mirrors BEV_Jetson / ackermann_rover_humble.
+#
+# Works with both compose v2 (`docker compose ...`) and legacy v1 (`docker-compose ...`);
+# the `version: "2.4"` key is required by v1 for `runtime: nvidia` and ignored by v2.
+#
+#   docker-compose build                  # build the smolvla-edge:sim image (once)
+#   docker-compose run --rm verify        # pretrained ACT on transfer-cube (known-good baseline)
+#   docker-compose run --rm eval          # eval: override via EVAL_ARGS="..."
+#   docker-compose run --rm infer         # smoke-test smolvla_base on its SO-101 dataset
+#   docker-compose run --rm train         # fine-tune (scripts/train.sh; needs a big GPU)
+#   docker-compose run --rm bench         # latency benchmark (BENCH_ARGS="...")
+#   docker-compose run --rm shell         # interactive shell
+#
+# The image runs mujoco 2.3.7 (matched to the ALOHA datasets/checkpoints); the host py3.12
+# stack runs mujoco 3.x — expect better fine-manipulation numbers in here (see design.md).
+version: "2.4"
+
+x-smolvla: &smolvla
+  image: smolvla-edge:sim
+  build:
+    context: .
+    dockerfile: docker/Dockerfile
+  runtime: nvidia
+  working_dir: /workspace
+  shm_size: 8g                # torch DataLoader workers need > default 64 MB
+  stop_signal: SIGINT
+  environment:
+    NVIDIA_VISIBLE_DEVICES: all
+    NVIDIA_DRIVER_CAPABILITIES: all   # compute + graphics (graphics is required for EGL)
+    MUJOCO_GL: ${MUJOCO_GL:-egl}      # set MUJOCO_GL=osmesa if EGL is unavailable
+    HF_TOKEN: ${HF_TOKEN:-}
+  volumes:
+    - ./:/workspace
+    - hf-cache:/root/.cache/huggingface   # persist model/dataset downloads across runs
+    - torch-cache:/root/.cache/torch      # torchvision backbones (resnet18 etc.)
+
+services:
+  shell:
+    <<: *smolvla
+    stdin_open: true
+    tty: true
+    command: bash
+
+  # Known-good baseline: pretrained ACT on AlohaTransferCube (verified ~60% success).
+  verify:
+    <<: *smolvla
+    command:
+      - bash
+      - -lc
+      - >
+        python -m smolvla_edge.eval --mode sim
+        --policy-path lerobot/act_aloha_sim_transfer_cube_human
+        --env-id gym_aloha/AlohaTransferCube-v0
+        --episodes ${EPISODES:-5} --max-steps 400 --task ""
+
+  # Generic eval — pass flags via EVAL_ARGS, e.g.:
+  #   EVAL_ARGS="--mode sim --policy-path lerobot/act_aloha_sim_insertion_human --episodes 10 --task ''" \
+  #     docker compose run --rm eval
+  eval:
+    <<: *smolvla
+    command:
+      - bash
+      - -lc
+      - python -m smolvla_edge.eval ${EVAL_ARGS:---help}
+
+  infer:
+    <<: *smolvla
+    command:
+      - bash
+      - -lc
+      - >
+        python -m smolvla_edge.infer --policy-path lerobot/smolvla_base
+        --dataset-repo-id lerobot/svla_so101_pickplace --episodes 2
+
+  train:
+    <<: *smolvla
+    command: bash scripts/train.sh
+
+  bench:
+    <<: *smolvla
+    command:
+      - bash
+      - -lc
+      - python -m smolvla_edge.bench ${BENCH_ARGS:---help}
+
+volumes:
+  hf-cache:
+  torch-cache:
