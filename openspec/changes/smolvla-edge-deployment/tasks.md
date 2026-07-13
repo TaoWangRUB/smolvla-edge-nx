@@ -3,13 +3,13 @@
 - [x] 1.1 Public repo + MIT license
 - [x] 1.2 README skeleton with the narrative
 - [x] 1.3 Pin LeRobot v0.5.0 in `requirements.txt`
-- [ ] 1.4 Create env on the dev box: `pip install -r requirements.txt` (+ system ffmpeg, MuJoCo/`MUJOCO_GL=egl`)
+- [x] 1.4 Create env on the dev box: LeRobot 0.5.0 + mujoco 3.10 + dm_control 1.0.43 + gym-aloha installed & verified (py3.12 needs the workaround in `scripts/setup_sim.sh`; headless via `MUJOCO_GL=egl`)
 - [x] 1.5 Confirm the showcase task — **ALOHA sim insertion** (`gym_aloha/AlohaInsertion-v0`, dataset `lerobot/aloha_sim_insertion_human`). Chosen so the correctness loop runs with **no robot**; real SO-101 is out of scope for now (no hardware). See `configs/train.aloha_sim.yaml`.
 
 ## 2. Correctness — verify in sim, then fine-tune (Phase 1)
 
 - [ ] 2.1 Smoke-test the stack: `python -m smolvla_edge.infer --policy-path lerobot/smolvla_base --dataset-repo-id lerobot/svla_so101_pickplace` (base is SO-101 embodiment — pair accordingly)
-- [ ] 2.2 **Verify-first (no fine-tune):** run a pretrained ALOHA policy through the harness to prove env + rollout + obs mapping and get a baseline success rate: `python -m smolvla_edge.eval --mode sim --policy-path lerobot/act_aloha_sim_insertion_human --env-id gym_aloha/AlohaInsertion-v0 --episodes 20 --task ""`
+- [x] 2.2 **Verify-first (no fine-tune):** ran pretrained `lerobot/act_aloha_sim_insertion_human` through the harness — env + rollout + obs mapping + normalization all work. Policy reliably **grasps** (reward ~2/4); 0% full insertion due to the mujoco 2.x→3.10 sim-version gap (see design "Simulation setup"). Command: `MUJOCO_GL=egl python -m smolvla_edge.eval --mode sim --policy-path lerobot/act_aloha_sim_insertion_human --episodes 20 --task ""`
 - [ ] 2.3 Fine-tune SmolVLA on the ALOHA dataset: `bash scripts/train.sh` (uses `configs/train.aloha_sim.yaml`; A100/H100, or Titan X slower)
 - [ ] 2.4 Verify the obs→policy key mapping in `smolvla_edge.eval._aloha_obs_to_batch` against your checkpoint's `policy.config.input_features` (largely settled once 2.2 passes)
 - [ ] 2.5 Evaluate the fine-tuned SmolVLA closed-loop → success-rate number (deliverable): `python -m smolvla_edge.eval --mode sim --policy-path outputs/train/smolvla_aloha/checkpoints/last --env-id gym_aloha/AlohaInsertion-v0 --episodes 20`

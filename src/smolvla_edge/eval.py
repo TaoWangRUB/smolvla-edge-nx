@@ -103,8 +103,82 @@ def _aloha_obs_to_batch(obs: dict, device: str, task: str | None = None) -> dict
     return batch
 
 
+def _load_normalizers(policy, policy_path: str, device: str):
+    """Return (normalize_obs, unnormalize_action) callables.
+
+    LeRobot 0.5.0 moved input/output normalization OUT of the policy model into a separate
+    processor pipeline, so calling `select_action` on raw inputs yields garbage. We recover the
+    normalization two ways:
+      1. New-format checkpoints (saved by LeRobot >=0.5.0) ship processor configs -> use the
+         official `make_pre_post_processors`.
+      2. Old-format checkpoints bake the stats into `model.safetensors` under
+         `normalize_inputs.*` / `unnormalize_outputs.*` -> apply them manually.
+    Falls back to identity (with a warning) if neither is found.
+    """
+    import torch
+
+    # 1) official processor pipeline (preferred; what a fine-tuned 0.5.0 checkpoint has)
+    try:
+        from lerobot.policies.factory import make_pre_post_processors
+
+        pre, post = make_pre_post_processors(
+            policy_cfg=policy.config,
+            pretrained_path=policy_path,
+            preprocessor_overrides={"device_processor": {"device": device}},
+        )
+        print("[eval] normalization: LeRobot processor pipeline")
+        return (lambda b: pre(b)), (lambda a: post(a))
+    except Exception as e:
+        print(f"[eval] no processor pipeline ({type(e).__name__}); trying baked-in stats")
+
+    # 2) stats baked into an old-format checkpoint's model.safetensors
+    try:
+        import os
+
+        from huggingface_hub import hf_hub_download
+        from safetensors.torch import load_file
+
+        st = (
+            os.path.join(policy_path, "model.safetensors")
+            if os.path.isdir(policy_path)
+            else hf_hub_download(policy_path, "model.safetensors")
+        )
+        sd = load_file(st)
+        need = [
+            "normalize_inputs.buffer_observation_images_top.mean",
+            "normalize_inputs.buffer_observation_images_top.std",
+            "normalize_inputs.buffer_observation_state.mean",
+            "normalize_inputs.buffer_observation_state.std",
+            "unnormalize_outputs.buffer_action.mean",
+            "unnormalize_outputs.buffer_action.std",
+        ]
+        if all(k in sd for k in need):
+            g = {k: sd[k].to(device) for k in need}
+            im = g["normalize_inputs.buffer_observation_images_top.mean"]
+            istd = g["normalize_inputs.buffer_observation_images_top.std"]
+            sm = g["normalize_inputs.buffer_observation_state.mean"]
+            sstd = g["normalize_inputs.buffer_observation_state.std"]
+            am = g["unnormalize_outputs.buffer_action.mean"]
+            astd = g["unnormalize_outputs.buffer_action.std"]
+
+            def norm(b):
+                b = dict(b)
+                b[IMAGE_KEY] = (b[IMAGE_KEY] - im) / istd
+                b[STATE_KEY] = (b[STATE_KEY] - sm) / sstd
+                return b
+
+            print("[eval] normalization: baked-in checkpoint stats (old format)")
+            return norm, (lambda a: a * astd + am)
+    except Exception as e:
+        print(f"[eval] baked-in stats unavailable ({type(e).__name__})")
+
+    print("[eval] WARNING: no normalization found — actions will be UN-normalized (garbage).")
+    return (lambda b: b), (lambda a: a)
+
+
 def eval_sim(
     policy,
+    policy_path: str,
     device,
     env_id: str,
     task: str,
@@ -125,6 +199,7 @@ def eval_sim(
     import gym_aloha  # noqa: F401  # registers the gym_aloha/* env ids
     import torch
 
+    normalize_obs, unnormalize_action = _load_normalizers(policy, policy_path, device)
     env = gym.make(env_id, obs_type=obs_type, render_mode="rgb_array")
     successes = 0
     max_rewards: list[float] = []
@@ -134,9 +209,9 @@ def eval_sim(
             policy.reset()
             ep_max_r = 0.0
             for _ in range(max_steps):
-                batch = _aloha_obs_to_batch(obs, device, task)
+                batch = normalize_obs(_aloha_obs_to_batch(obs, device, task))
                 with torch.no_grad():
-                    action = policy.select_action(batch)
+                    action = unnormalize_action(policy.select_action(batch))
                 act_np = action.squeeze(0).float().cpu().numpy()
                 obs, reward, terminated, truncated, _ = env.step(act_np)
                 ep_max_r = max(ep_max_r, float(reward))
@@ -185,7 +260,8 @@ def main() -> None:
 
     if args.mode == "sim":
         result = eval_sim(
-            policy, device, args.env_id, args.task, args.episodes, args.max_steps, args.obs_type
+            policy, args.policy_path, device, args.env_id, args.task,
+            args.episodes, args.max_steps, args.obs_type,
         )
     else:
         ds = load_dataset(args.dataset_repo_id, episodes=list(range(args.episodes)))
