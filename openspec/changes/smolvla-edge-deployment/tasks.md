@@ -11,7 +11,7 @@
 
 - [ ] 2.1 Smoke-test the stack: `python -m smolvla_edge.infer --policy-path lerobot/smolvla_base --dataset-repo-id lerobot/svla_so101_pickplace` (base is SO-101 embodiment — pair accordingly)
 - [x] 2.2 **Verify-first (no fine-tune):** pretrained checkpoints run through the harness end-to-end. Transfer cube: **3/5 = 60% success** (`lerobot/act_aloha_sim_transfer_cube_human`, the positive baseline). Insertion: 0/3, grasps only (reward 2/4) — mujoco 2.x→3.10 sim-version gap (see design "Simulation setup"). Reproduce: `docker compose run --rm verify`
-- [x] 2.2b Re-ran verify inside the Docker image (matched mujoco 2.3.7): transfer cube **4/5 = 80%** (vs 60% on host mujoco 3.10 — the sim-version gap measured directly). Insertion number pending more episodes.
+- [x] 2.2b Re-ran verify inside the Docker image (matched mujoco 2.3.7): transfer cube **4/5 = 80%** (vs 60% on host mujoco 3.10 — the sim-version gap measured directly). Insertion: still 0/5 in-container (mean max reward 2.2, one episode reached 3/4) — matched mujoco helps but doesn't recover the published ~50% at 5 episodes; likely needs more episodes and/or ACT temporal-ensembling settings.
 - [ ] 2.3 Fine-tune SmolVLA on the ALOHA dataset: `bash scripts/train.sh` (uses `configs/train.aloha_sim.yaml`; A100/H100, or Titan X slower)
 - [ ] 2.4 Verify the obs→policy key mapping in `smolvla_edge.eval._aloha_obs_to_batch` against your checkpoint's `policy.config.input_features` (largely settled once 2.2 passes)
 - [ ] 2.5 Evaluate the fine-tuned SmolVLA closed-loop → success-rate number (deliverable): `python -m smolvla_edge.eval --mode sim --policy-path outputs/train/smolvla_aloha/checkpoints/last --env-id gym_aloha/AlohaInsertion-v0 --episodes 20`
