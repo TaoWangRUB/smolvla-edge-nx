@@ -2,11 +2,15 @@
 # The [smolvla] extra pulls in transformers, torchcodec, num2words, accelerate, etc.
 lerobot[smolvla]==0.5.0
 
-# Simulation evaluation (no robot required): gym-aloha is a LeRobot-native MuJoCo env.
-# Provides gym_aloha/AlohaInsertion-v0 and gym_aloha/AlohaTransferCube-v0. Needs a working
-# MuJoCo (pulled in transitively) and, on a headless box, an EGL/osmesa GL backend
-# (e.g. `export MUJOCO_GL=egl`).
-gym-aloha==0.1.1
+# Simulation evaluation (no robot required): gym-aloha is a LeRobot-native MuJoCo env
+# (gym_aloha/AlohaInsertion-v0, AlohaTransferCube-v0). Needs MuJoCo + a headless GL backend
+# (`export MUJOCO_GL=egl` on a GPU box, or `osmesa` on CPU).
+#
+# ⚠️ Python 3.12: gym-aloha 0.1.1 pins mujoco<3.0.0 (== 2.3.7), which has no cp312 wheel and
+# won't build. Do NOT rely on this line under 3.12 — run `bash scripts/setup_sim.sh` instead
+# (installs mujoco 3.x + matching dm_control, then gym-aloha --no-deps). Verified with
+# mujoco 3.10.0 / dm_control 1.0.43. On Python 3.10/3.11 this line works as-is.
+gym-aloha==0.1.1  ; python_version < "3.12"
 
 # Client/server deployment (gRPC)
 grpcio==1.66.2

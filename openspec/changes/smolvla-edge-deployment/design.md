@@ -105,6 +105,29 @@ Operational reference for standing up the edge target (migrated from `docs/setup
 5. **Sanity check.** `python -m smolvla_edge.infer --policy-path <checkpoint> --episodes 1
    --max-frames 10`, then proceed to on-device deployment and the benchmark commands.
 
+## Simulation setup — verified findings
+
+Standing up gym-aloha and running a pretrained policy end-to-end surfaced three things worth
+recording (all confirmed on Python 3.12 / torch 2.10 / mujoco 3.10 / lerobot 0.5.0, WSL2 + RTX 2000
+Ada, headless EGL):
+
+1. **mujoco 2.3.7 (gym-aloha's pin) has no py3.12 wheel.** Install a modern mujoco 3.x + matching
+   dm_control and add gym-aloha with `--no-deps` (see `scripts/setup_sim.sh`). gym-aloha is a thin
+   dm_control wrapper, so mujoco 3.x works at runtime; the dm_control↔mujoco pair MUST match
+   (a skew shows up as `AttributeError: 'MjModel' object has no attribute 'flex_interp'`).
+2. **LeRobot 0.5.0 externalized normalization.** Input/output normalization moved out of the policy
+   model into a separate processor pipeline (`make_pre_post_processors`), so calling
+   `select_action` on raw inputs yields garbage (success 0, reward 0). `eval_sim` now applies the
+   processor pipeline for 0.5.0 checkpoints and falls back to stats baked into an old checkpoint's
+   `model.safetensors`. Old pretrained checkpoints (e.g. `lerobot/act_aloha_sim_insertion_human`)
+   are old-format (no processor json) → the baked-in path is used.
+3. **Sim-version gap.** The HF ALOHA datasets and old checkpoints were generated with mujoco 2.x;
+   evaluating in mujoco 3.10 transfers coarse behavior (a pretrained ACT policy reliably *grasps*,
+   reward ~2/4) but not the fine bimanual insertion (0% full success in a quick check). Implication
+   for the fine-tune: train and evaluate under the **same** mujoco, or expect a train/eval gap.
+   Regenerating the dataset under mujoco 3.x, or pinning mujoco 2.x on py3.10/3.11 for both, avoids
+   it.
+
 ## Risks / Trade-offs
 
 - **Full TensorRT of a SmolVLM-2 + flow-matching VLA is non-trivial** → Don't claim a clean
