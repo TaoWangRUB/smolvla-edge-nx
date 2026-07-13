@@ -36,10 +36,11 @@ RUN mkdir -p /usr/share/glvnd/egl_vendor.d && printf '%s\n' \
     > /usr/share/glvnd/egl_vendor.d/10_nvidia.json
 
 # Python stack. Torch/torchvision are pinned to the base image's versions so pip cannot
-# "upgrade" them to a CPU build. gym-aloha resolves to mujoco 2.3.7 + dm_control 1.0.14 on
-# py3.11 — the matched pair the ALOHA sim datasets/checkpoints were generated with.
+# "upgrade" them to a CPU build; torchcodec 0.2.x is the torch-2.6 ABI match (0.10 targets
+# torch 2.10 and fails with an undefined c10 symbol). gym-aloha resolves to mujoco 2.3.7 +
+# dm_control 1.0.14 on py3.11 — the matched pair the ALOHA datasets/checkpoints use.
 RUN pip install --no-cache-dir \
-    "torch==2.6.0" "torchvision==0.21.0" \
+    "torch==2.6.0" "torchvision==0.21.0" "torchcodec==0.2.1" \
     "lerobot[smolvla]==0.4.4" \
     "gym-aloha==0.1.1" \
     "grpcio==1.66.2" "grpcio-tools==1.66.2" "protobuf>=5.27,<6" \

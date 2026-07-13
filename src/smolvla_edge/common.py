@@ -107,11 +107,47 @@ def load_policy(policy_path: str, device: str = "auto", policy_type: str = "auto
     return policy, dev
 
 
-def load_dataset(repo_id: str, episodes: list[int] | None = None):
-    """Load a LeRobot dataset from the hub (cached locally on first use)."""
+def make_language_tokenizer(policy, device: str):
+    """Return fn(task_str) -> {language token/mask keys}, or None if the policy has no LM.
+
+    SmolVLA reads pre-tokenized language from the batch (observation.language.tokens /
+    .attention_mask); LeRobot's processor pipeline normally provides it. When we build batches
+    by hand (smoke test, sim rollout), tokenize the task string with the policy's own VLM
+    tokenizer. Non-language policies (ACT, diffusion) return None.
+    """
+    vlm_name = getattr(getattr(policy, "config", None), "vlm_model_name", None)
+    if not vlm_name:
+        return None
+    from transformers import AutoProcessor
+
+    tokenizer = AutoProcessor.from_pretrained(vlm_name).tokenizer
+    max_len = getattr(policy.config, "tokenizer_max_length", 48)
+
+    def tokenize(task: str) -> dict:
+        enc = tokenizer(
+            task, padding="max_length", truncation=True, max_length=max_len, return_tensors="pt"
+        )
+        return {
+            "observation.language.tokens": enc["input_ids"].to(device),
+            "observation.language.attention_mask": enc["attention_mask"].to(device).bool(),
+        }
+
+    return tokenize
+
+
+def load_dataset(repo_id: str, episodes: list[int] | None = None, video_backend: str | None = None):
+    """Load a LeRobot dataset from the hub (cached locally on first use).
+
+    video_backend defaults to "pyav" (override via SMOLVLA_VIDEO_BACKEND): the torchcodec
+    backend couples to the torch ABI (torchcodec 0.2.x/torch 2.6 rejects the file handles
+    lerobot 0.4.x passes it), while pyav binds ffmpeg directly and works everywhere.
+    """
+    import os
+
     from lerobot.datasets.lerobot_dataset import LeRobotDataset
 
-    return LeRobotDataset(repo_id, episodes=episodes)
+    backend = video_backend or os.environ.get("SMOLVLA_VIDEO_BACKEND", "pyav")
+    return LeRobotDataset(repo_id, episodes=episodes, video_backend=backend)
 
 
 @dataclass
