@@ -51,8 +51,41 @@ def frames_replay(args) -> list:
     return [to_uint8_hwc(ds[i][img_key]) for i in range(0, n, args.stride)]
 
 
+CONTROL_HZ = 50  # gym-aloha control/render rate (dt = 20 ms)
+
+
+def _overlay(frame_np, step: int, reward: float, success: bool):
+    """Stamp sim time / control rate / reward status onto a frame (returns np.uint8 HWC)."""
+    import numpy as np
+    from PIL import Image, ImageDraw
+
+    try:  # DejaVu ships with matplotlib; fall back to PIL's bitmap font
+        import matplotlib
+        from PIL import ImageFont
+        from pathlib import Path
+
+        ttf = Path(matplotlib.get_data_path()) / "fonts/ttf/DejaVuSans-Bold.ttf"
+        font = ImageFont.truetype(str(ttf), 18)
+    except Exception:
+        font = None
+
+    img = Image.fromarray(frame_np)
+    draw = ImageDraw.Draw(img, "RGBA")
+    t_sim = step / CONTROL_HZ
+    status = "SUCCESS" if success else f"reward {reward:.0f}/4"
+    text = f"sim t = {t_sim:5.2f} s   |   {CONTROL_HZ} Hz control   |   {status}"
+    draw.rectangle([0, 0, img.width, 30], fill=(0, 0, 0, 160))
+    draw.text((8, 6), text, fill=(255, 255, 255), font=font)
+    return np.asarray(img)
+
+
 def frames_rollout(args) -> list:
-    """Run the policy closed-loop in gym-aloha and render; keep the first successful episode."""
+    """Run the policy closed-loop in gym-aloha and render; keep the first successful episode.
+
+    The env terminates the instant reward hits 4, which would cut the GIF at the moment of
+    success — so after success we keep stepping the physics for --post-steps (the "epilogue":
+    the arms holding the handover) and then hold the final frame for --hold seconds.
+    """
     import gymnasium as gym
     import gym_aloha  # noqa: F401
     import torch
@@ -64,15 +97,15 @@ def frames_rollout(args) -> list:
     normalize_obs, unnormalize_action = _load_normalizers(policy, args.policy_path, device)
     env = gym.make(args.env_id, obs_type="pixels_agent_pos", render_mode="rgb_array")
 
-    best_frames: list = []
+    best: list = []  # (frame, step, reward, success_so_far)
     best_reward = -1.0
     try:
         for seed in range(args.max_tries):
             obs, _ = env.reset(seed=seed)
             policy.reset()
-            frames, ep_max_r = [], 0.0
-            for _ in range(args.max_steps):
-                frames.append(env.render())
+            recs, ep_max_r, post = [], 0.0, None
+            for step in range(args.max_steps + args.post_steps):
+                recs.append((env.render(), step, ep_max_r, ep_max_r >= 4.0))
                 batch = normalize_obs(_aloha_obs_to_batch(obs, device, args.task or None))
                 with torch.no_grad():
                     action = unnormalize_action(policy.select_action(batch))
@@ -80,12 +113,17 @@ def frames_rollout(args) -> list:
                     action.squeeze(0).float().cpu().numpy()
                 )
                 ep_max_r = max(ep_max_r, float(reward))
-                if terminated or truncated:
-                    break
+                # On success, don't stop — run the epilogue so the GIF doesn't cut mid-handover.
+                if post is None and (terminated or truncated or ep_max_r >= 4.0):
+                    post = args.post_steps
+                elif post is not None:
+                    post -= 1
+                    if post <= 0:
+                        break
             print(f"[gif] rollout seed {seed}: max_reward={ep_max_r} "
                   f"({'SUCCESS' if ep_max_r >= 4.0 else 'no success'})")
             if ep_max_r > best_reward:
-                best_reward, best_frames = ep_max_r, frames
+                best_reward, best = ep_max_r, recs
             if ep_max_r >= 4.0:
                 break
     finally:
@@ -94,7 +132,16 @@ def frames_rollout(args) -> list:
     if best_reward < 4.0:
         print(f"[gif] WARNING: no successful episode in {args.max_tries} tries; "
               f"using the best one (max_reward={best_reward})")
-    return [to_uint8_hwc(f) for f in best_frames[:: args.stride]]
+
+    kept = best[:: args.stride]
+    frames = [
+        _overlay(to_uint8_hwc(f), step, r, ok) if args.overlay else to_uint8_hwc(f)
+        for f, step, r, ok in kept
+    ]
+    # Freeze the final frame so the end state is readable before the GIF loops.
+    if frames and args.hold > 0:
+        frames += [frames[-1]] * int(args.hold * args.fps)
+    return frames
 
 
 def main() -> None:
@@ -106,14 +153,21 @@ def main() -> None:
     ap.add_argument("--task", default="", help="language instruction (SmolVLA); empty for ACT")
     ap.add_argument("--max-steps", type=int, default=400, help="(rollout) steps per episode")
     ap.add_argument("--max-tries", type=int, default=5, help="(rollout) seeds to try for a success")
+    ap.add_argument("--post-steps", type=int, default=75,
+                    help="(rollout) extra sim steps after success so the GIF doesn't cut at the handover")
+    ap.add_argument("--hold", type=float, default=1.5, help="(rollout) freeze final frame this many s")
+    ap.add_argument("--overlay", action=argparse.BooleanOptionalAction, default=True,
+                    help="stamp sim time / control Hz / reward onto rollout frames")
     ap.add_argument("--device", default="auto")
     # replay args
     ap.add_argument("--dataset-repo-id", default="lerobot/aloha_sim_insertion_human")
     ap.add_argument("--episodes", type=int, default=1)
     ap.add_argument("--max-frames", type=int, default=500)
     # shared
-    ap.add_argument("--stride", type=int, default=3, help="keep every Nth frame (size/speed)")
-    ap.add_argument("--fps", type=int, default=17, help="GIF playback fps (50/stride ~= real-time)")
+    ap.add_argument("--stride", type=int, default=3, help="keep every Nth sim frame (size/speed)")
+    ap.add_argument("--fps", type=int, default=17,
+                    help="GIF PLAYBACK fps (display rate, not the sim rate): the sim runs at "
+                    "50 Hz control, so playback fps = 50/stride plays back at ~1x real time")
     ap.add_argument("--out", default="benchmarks/results/demo.gif")
     args = ap.parse_args()
 
