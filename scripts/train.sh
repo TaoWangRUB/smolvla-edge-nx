@@ -14,6 +14,9 @@ BATCH_SIZE="${BATCH_SIZE:-64}"
 STEPS="${STEPS:-20000}"
 SAVE_FREQ="${SAVE_FREQ:-2000}"
 OUTPUT_DIR="${OUTPUT_DIR:-outputs/train/smolvla_aloha}"
+# smolvla_base declares 3 camera slots (camera1..3); the ALOHA sim dataset has one (top).
+# Renaming top->camera1 satisfies lerobot's subset validation; absent slots are tolerated.
+RENAME_MAP="${RENAME_MAP:-{\"observation.images.top\": \"observation.images.camera1\"}}"
 
 echo "[train] policy=${POLICY_PATH} dataset=${DATASET_REPO_ID}"
 echo "[train] batch_size=${BATCH_SIZE} steps=${STEPS} -> ${OUTPUT_DIR}"
@@ -22,7 +25,10 @@ echo "[train] batch_size=${BATCH_SIZE} steps=${STEPS} -> ${OUTPUT_DIR}"
 # --policy.path at an existing checkpoints/last dir instead of the base model.
 lerobot-train \
   --policy.path="${POLICY_PATH}" \
+  --policy.push_to_hub=false \
   --dataset.repo_id="${DATASET_REPO_ID}" \
+  --dataset.video_backend=pyav \
+  --rename_map="${RENAME_MAP}" \
   --batch_size="${BATCH_SIZE}" \
   --steps="${STEPS}" \
   --save_freq="${SAVE_FREQ}" \

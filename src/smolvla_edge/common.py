@@ -39,6 +39,20 @@ _POLICY_CLASS_BY_TYPE = {
 }
 
 
+def resolve_policy_path(policy_path: str) -> str:
+    """Accept a lerobot checkpoint dir (e.g. checkpoints/last) and descend into pretrained_model.
+
+    lerobot-train saves <step>/pretrained_model/{config.json, model.safetensors, processors...};
+    every consumer (policy loading AND processor loading) needs the inner dir.
+    """
+    from pathlib import Path
+
+    p = Path(policy_path)
+    if p.is_dir() and not (p / "config.json").exists() and (p / "pretrained_model/config.json").exists():
+        return str(p / "pretrained_model")
+    return policy_path
+
+
 def _detect_policy_type(policy_path: str) -> str | None:
     """Read the policy `type` from a checkpoint dir or HF repo `config.json`."""
     import json
@@ -98,6 +112,7 @@ def load_policy(policy_path: str, device: str = "auto", policy_type: str = "auto
         policy_type: "auto" to read it from the checkpoint config, or force one of
             smolvla/act/diffusion/pi0/vqbet/tdmpc.
     """
+    policy_path = resolve_policy_path(policy_path)
     dev = select_device(device)
     ptype = policy_type if policy_type != "auto" else (_detect_policy_type(policy_path) or "smolvla")
     policy = _get_policy_class(ptype).from_pretrained(policy_path)

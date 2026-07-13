@@ -98,10 +98,10 @@ def frames_rollout(args) -> list:
     import torch
 
     from smolvla_edge.common import load_policy
-    from smolvla_edge.eval import _aloha_obs_to_batch, _load_normalizers
+    from smolvla_edge.eval import make_sim_stepper
 
     policy, device = load_policy(args.policy_path, args.device)
-    normalize_obs, unnormalize_action = _load_normalizers(policy, args.policy_path, device)
+    stepper = make_sim_stepper(policy, args.policy_path, device, args.task or None)
     env = gym.make(args.env_id, obs_type="pixels_agent_pos", render_mode="rgb_array")
 
     def _sync():
@@ -114,8 +114,7 @@ def frames_rollout(args) -> list:
         # Warmup: the first CUDA call pays kernel-compile/autotune costs (~hundreds of ms),
         # which would show up as a bogus "policy latency" on frame 0 of the overlay.
         obs, _ = env.reset(seed=0)
-        with torch.no_grad():
-            policy.select_action(normalize_obs(_aloha_obs_to_batch(obs, device, args.task or None)))
+        stepper(obs)
         _sync()
 
         for seed in range(args.max_tries):
@@ -123,17 +122,13 @@ def frames_rollout(args) -> list:
             policy.reset()
             recs, ep_max_r, post = [], 0.0, None
             for step in range(args.max_steps + args.post_steps):
-                batch = normalize_obs(_aloha_obs_to_batch(obs, device, args.task or None))
                 _sync()
                 t0 = time.perf_counter()
-                with torch.no_grad():
-                    action = unnormalize_action(policy.select_action(batch))
+                act_np = stepper(obs)
                 _sync()
                 lat_ms = (time.perf_counter() - t0) * 1e3
                 recs.append((env.render(), step, ep_max_r, ep_max_r >= 4.0, lat_ms))
-                obs, reward, terminated, truncated, _ = env.step(
-                    action.squeeze(0).float().cpu().numpy()
-                )
+                obs, reward, terminated, truncated, _ = env.step(act_np)
                 ep_max_r = max(ep_max_r, float(reward))
                 # On success, don't stop — run the epilogue so the GIF doesn't cut mid-handover.
                 if post is None and (terminated or truncated or ep_max_r >= 4.0):

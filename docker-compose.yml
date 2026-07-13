@@ -30,6 +30,14 @@ x-smolvla: &smolvla
     NVIDIA_DRIVER_CAPABILITIES: all   # compute + graphics (graphics is required for EGL)
     MUJOCO_GL: ${MUJOCO_GL:-egl}      # set MUJOCO_GL=osmesa if EGL is unavailable
     HF_TOKEN: ${HF_TOKEN:-}
+    # Training knobs passed through to scripts/train.sh (empty -> its own defaults apply):
+    #   BATCH_SIZE=4 STEPS=1000 docker compose run --rm train
+    POLICY_PATH: ${POLICY_PATH:-}
+    DATASET_REPO_ID: ${DATASET_REPO_ID:-}
+    BATCH_SIZE: ${BATCH_SIZE:-}
+    STEPS: ${STEPS:-}
+    SAVE_FREQ: ${SAVE_FREQ:-}
+    OUTPUT_DIR: ${OUTPUT_DIR:-}
   volumes:
     - ./:/workspace
     - hf-cache:/root/.cache/huggingface   # persist model/dataset downloads across runs
