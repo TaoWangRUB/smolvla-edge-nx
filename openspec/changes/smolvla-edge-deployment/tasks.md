@@ -31,7 +31,7 @@
 - [ ] 4.1 Produce the results rows across available tiers — **local-GPU tier done** (RTX 2000 Ada, pretrained ACT: fp32 0.68 ms/1474 Hz/266 MB; fp16-autocast 0.69 ms/1444 Hz — parity: tiny model is overhead-bound). NX tiers pending hardware; SmolVLA rows pending the fine-tune
 - [ ] 4.2 Capture metrics: end-to-end latency, throughput, peak memory ✔ (in bench.py rows); action-chunk frequency still to add
 - [x] 4.3 Collate raw JSON → `results/summary.csv` + markdown table via `benchmarks/collate.py` (verified in-container, 2 rows)
-- [x] 4.4 Build the demo GIF from the ALOHA sim dataset frames via `scripts/make_demo_gif.py` → `benchmarks/results/demo.gif` (120 frames @ 15 fps)
+- [x] 4.4 Demo GIF via `scripts/make_demo_gif.py` → `benchmarks/results/demo.gif`. Now a **closed-loop policy rollout** (pretrained ACT succeeding at cube transfer in gym-aloha, reward 4/4, ~real-time), not a dataset replay; `--mode replay` kept as the no-policy fallback
 - [ ] 4.5 Write the README narrative: "Fine-tuning SmolVLA in sim, and deploying a flow-matching VLA on 8 GB edge hardware"
 
 ## 5. Docs migration
