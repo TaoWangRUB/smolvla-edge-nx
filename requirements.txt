@@ -10,6 +10,9 @@ lerobot[smolvla]==0.5.0
 # won't build. Do NOT rely on this line under 3.12 — run `bash scripts/setup_sim.sh` instead
 # (installs mujoco 3.x + matching dm_control, then gym-aloha --no-deps). Verified with
 # mujoco 3.10.0 / dm_control 1.0.43. On Python 3.10/3.11 this line works as-is.
+#
+# ➡ Preferred: the Docker environment (docker-compose.yml) — py3.11 image with the *matched*
+#   mujoco 2.3.7 the ALOHA checkpoints/datasets were generated with (avoids the sim-version gap).
 gym-aloha==0.1.1  ; python_version < "3.12"
 
 # Client/server deployment (gRPC)

@@ -117,6 +117,14 @@ def _load_normalizers(policy, policy_path: str, device: str):
     """
     import torch
 
+    # 0) policy normalizes internally (lerobot <=0.4.x): its state_dict carries loaded
+    #    normalize/unnormalize buffers, and select_action applies them itself. Applying stats
+    #    again here would DOUBLE-normalize — so do nothing.
+    norm_keys = [k for k in policy.state_dict() if "normalize" in k.lower()]
+    if norm_keys:
+        print(f"[eval] normalization: internal to the policy ({len(norm_keys)} buffers) — no-op")
+        return (lambda b: b), (lambda a: a)
+
     # 1) official processor pipeline (preferred; what a fine-tuned 0.5.0 checkpoint has)
     try:
         from lerobot.policies.factory import make_pre_post_processors
