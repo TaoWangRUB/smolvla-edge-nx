@@ -32,20 +32,29 @@ produced by the network from the current camera image + joint state.
 - **Scene:** two ViperX arms (14 DoF total), one 480×640 top camera
 - **Result:** **70 % success** over 20 episodes — vs 65 % for the ACT baseline (see Results)
 
-**Timing, plainly.** The **control frequency is 50 Hz**: the robot consumes one action every
-**20 ms**. The VLA does *not* run the full network every step — it predicts a **chunk of 50
-actions at once** and plays them from a queue:
+**Timing, plainly.** The robot runs a **50 Hz control loop**: it needs one action every
+**20 ms**. SmolVLA does not run its network every step — one full inference produces a
+**chunk of 50 actions**, which are then executed one per control step. So each control step
+is one of two kinds (all times measured on the RTX 2000 Ada by the CUDA-synced per-step
+timer shown in the GIF header):
 
-| what | measured (RTX 2000 Ada) | vs the 20 ms budget |
-|---|---|---|
-| per-step overhead between boundaries (image→tensor, normalize, tokenize — the queue pop itself is ~µs and the network does **not** run) | ~5–7 ms | fits; mostly wasted work on these steps — an easy Phase-2 trim, since the popped action never uses the fresh observation |
-| full VLA inference at a chunk boundary (VLM prefill + action expert) | **~300 ms** | ≈ 15 control periods |
-| average compute per action (one 300 ms inference yields 50 actions: 300 ÷ 50) | ~6 ms | fits — the GPU produces actions faster than the robot consumes them, *on average* |
+- **Replay step (49 out of every 50): ~5–7 ms.** The robot executes a precomputed action
+  from the chunk — **no neural network runs**. The 5–7 ms is purely our harness preparing
+  the *next* observation (camera image → tensor → GPU, tokenize the instruction, normalize).
+  On these steps that preparation is even discarded — a known optimization to reclaim.
+- **Inference step (1 out of every 50): ~300 ms.** The full model runs once: the SmolVLM-2
+  backbone encodes image + instruction + state, then the flow-matching action expert
+  integrates 10 steps to produce the next 50 actions.
 
-So the expensive VLM effectively runs at **~1 Hz** while the arm moves at 50 Hz. Run
-synchronously, the robot would freeze ~0.3 s at every chunk boundary — decoupling prediction
-from execution (async chunking) hides it, and doing that within 8 GB is exactly Phase 2's job.
-Both numbers are visible live in the GIF header.
+The arithmetic that follows from this:
+- 50 actions ÷ 50 Hz → **one chunk covers exactly 1 s of robot motion**, so the full
+  network runs **once per second** — that (and nothing else) is the "VLM at 1 Hz" claim.
+- 300 ms ÷ 50 actions = **6 ms of compute per executed action**, under the 20 ms budget —
+  the GPU keeps up on average.
+- But at each inference step the robot would stand still for **300 ms = 15 missed control
+  ticks** if prediction and execution were serialized. Decoupling them (compute the next
+  chunk while the current one is still executing) hides the stall — doing that within 8 GB
+  is Phase 2's job.
 
 For comparison, the **ACT baseline** (~52 M task-specific specialist) through the identical
 harness — far cheaper per step, but no language conditioning and a lower success rate (see
