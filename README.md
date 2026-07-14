@@ -15,17 +15,25 @@ The Xavier NX edge phase is fully specced and kicks in whenever a Jetson is on h
 
 ---
 
-## Demo — a policy doing the task, with its latency on screen
+## Demo — the fine-tuned SmolVLA doing the task, with its latency on screen
 
-![Closed-loop policy rollout in gym-aloha: bimanual cube transfer with sim-time, control-rate, per-step policy latency and task reward overlaid](benchmarks/results/demo.gif)
+![This repo's fine-tuned SmolVLA running the bimanual cube transfer closed-loop, with sim-time, control rate, per-step policy latency and task reward overlaid](benchmarks/results/demo_smolvla.gif)
 
-**What you're watching.** A pretrained **ACT** policy (`lerobot/act_aloha_sim_transfer_cube_human`,
-~80 M params) running **closed-loop** in the `gym_aloha/AlohaTransferCube-v0` MuJoCo environment,
-driven through this repo's eval harness (`scripts/make_demo_gif.py --mode rollout`). Two ViperX
-arms, **14 degrees of freedom** (6 joints + gripper per arm), a single 480×640 top camera. Task:
-*pick up the red cube with the right arm and hand it to the left arm.* This is a real rollout —
-every action comes from the network reading the image + joint state at 50 Hz — not a replayed
-demonstration. Playback is ≈ real time.
+**What you're watching.** **This repo's fine-tuned SmolVLA** (450 M params, language-conditioned,
+trained in `notebooks/colab_train_smolvla_aloha.ipynb`) running **closed-loop** in the
+`gym_aloha/AlohaTransferCube-v0` MuJoCo environment, driven through this repo's eval harness
+(`scripts/make_demo_gif.py --mode rollout`). Two ViperX arms, **14 degrees of freedom**, a single
+480×640 top camera, instruction: *"Pick up the cube with the right arm and transfer it to the left
+arm."* A real rollout — every action comes from the network reading image + joint state at 50 Hz.
+Playback ≈ real time. Note the latency rhythm: ~5–7 ms queue-pop steps punctuated by a **~300 ms
+VLM prefill** at chunk boundaries — that spike *is* the on-device challenge, and why Phase 2 runs
+the VLM at low Hz behind action chunking.
+
+For comparison, the **ACT baseline** (~52 M task-specific specialist) through the identical
+harness — far cheaper per step, but no language conditioning and a lower success rate (see
+Results):
+
+![The pretrained ACT baseline running the same task through the same harness](benchmarks/results/demo.gif)
 
 **The header, field by field:**
 
@@ -70,28 +78,36 @@ edge deployment and latency engineering.
 
 ## Roadmap
 
-Progress: **17 / 27 tasks** — details in
+Progress: **18 / 27 tasks** — details in
 [the change tasks](openspec/changes/smolvla-edge-deployment/tasks.md).
 
-**Current milestone — the head-to-head: fine-tuned SmolVLA vs pretrained ACT on
-`AlohaTransferCube-v0`, identical 20-episode protocol.** Baseline is locked:
-**ACT 13/20 = 65 %**. The SmolVLA 20k-step fine-tune is running on a Colab A100
-(`notebooks/colab_train_smolvla_aloha.ipynb`; ~2.5 h at 2.2 steps/s, loss 0.05 by step 1.2k).
+**Headline result — the head-to-head is in: the fine-tuned SmolVLA wins.** On
+`AlohaTransferCube-v0`, identical 20-episode protocol, matched simulator:
+**SmolVLA 14/20 = 70 %** vs **ACT baseline 13/20 = 65 %** — the language-conditioned
+generalist beats the task-specific specialist, at ~40× the inference compute. That compute
+gap (36 Hz ceiling vs the 50 Hz control loop) is exactly what the edge phase exists to close.
 
 | Phase | What | Status | Notes |
 |-------|------|--------|-------|
 | 0 | **Scaffold + environment** — repo, pins, host env, **Docker env** | ✅ 6/6 | matched-mujoco container built & verified |
 | 1 | **Correctness (sim)** — verify-first, fine-tune SmolVLA, closed-loop eval | ✅ 6/6 | **Deliverable: fine-tuned SmolVLA 70 % success** (transfer cube, 20 eps, matched mujoco) vs official ACT baseline **65 %** on identical seeds; trained 20k steps on Colab A100 |
 | 2 | **Edge deployment** (optional) — Xavier NX on-device + client/server | ⏸ 0/7 | parked until a Jetson NX is on hand; chunking, low-Hz VLM, INT8-where-it-converts |
-| 3 | **Benchmarks + writeup** — latency table + demo GIF + narrative | 🔄 2/5 | ✅ demo GIF (policy rollout w/ latency overlay), collate; latency rows for BOTH architectures measured; narrative awaits the head-to-head number |
+| 3 | **Benchmarks + writeup** — latency table + demo GIF + narrative | 🔄 3/5 | ✅ demo GIFs (fine-tuned SmolVLA + ACT baseline, latency overlays), collate, narrative through Phase 1; NX benchmark tiers pending hardware |
 
 **Measured so far** (RTX 2000 Ada, matched-mujoco container):
 
 | | ACT (80 M specialist) | SmolVLA (450 M generalist) |
 |---|---|---|
-| transfer-cube success (20 eps) | **65 %** | ⏳ training |
+| transfer-cube success (20 eps) | 65 % | **70 %** |
 | select_action mean / throughput | 0.68 ms / 1474 Hz | 27.7 ms / 36 Hz (chunk-boundary VLM prefill dominates) |
 | peak GPU memory | 266 MB | 927 MB |
+
+**Failure modes** (for the writeup): SmolVLA's 6 failures were mostly post-grasp stalls
+(reward 1–2); ACT's included one complete miss (reward 0). Neither drops the cube post-transfer.
+Two transferable findings: (1) **the simulator version is part of the eval** — the same ACT
+checkpoint scores 60 % under mujoco 3.10 vs 80 % under the matched 2.3.7 container; (2)
+**verify-first pays** — one pretrained-policy rollout caught a normalization bug that silently
+zeroed success rates before any GPU-hours were spent.
 
 Training pipeline hardening from the Colab sessions (HF Xet downloads unreliable from Colab →
 datasets/models staged from Drive tarballs; full findings in
