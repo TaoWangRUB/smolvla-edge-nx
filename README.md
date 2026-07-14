@@ -40,7 +40,7 @@ actions at once** and plays them from a queue:
 |---|---|---|
 | per-step action fetch (queue pop) | ~5–7 ms | fits |
 | full VLA inference at a chunk boundary (VLM prefill + action expert) | **~300 ms** | ≈ 15 control periods |
-| amortized over the 50-action chunk | ~6 ms per action | fits |
+| average compute per action (one 300 ms inference yields 50 actions: 300 ÷ 50) | ~6 ms | fits — the GPU produces actions faster than the robot consumes them, *on average* |
 
 So the expensive VLM effectively runs at **~1 Hz** while the arm moves at 50 Hz. Run
 synchronously, the robot would freeze ~0.3 s at every chunk boundary — decoupling prediction
