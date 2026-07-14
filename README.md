@@ -15,6 +15,34 @@ The Xavier NX edge phase is fully specced and kicks in whenever a Jetson is on h
 
 ---
 
+## Demo — a policy doing the task, with its latency on screen
+
+![Closed-loop policy rollout in gym-aloha: bimanual cube transfer with sim-time, control-rate, per-step policy latency and task reward overlaid](benchmarks/results/demo.gif)
+
+**What you're watching.** A pretrained **ACT** policy (`lerobot/act_aloha_sim_transfer_cube_human`,
+~80 M params) running **closed-loop** in the `gym_aloha/AlohaTransferCube-v0` MuJoCo environment,
+driven through this repo's eval harness (`scripts/make_demo_gif.py --mode rollout`). Two ViperX
+arms, **14 degrees of freedom** (6 joints + gripper per arm), a single 480×640 top camera. Task:
+*pick up the red cube with the right arm and hand it to the left arm.* This is a real rollout —
+every action comes from the network reading the image + joint state at 50 Hz — not a replayed
+demonstration. Playback is ≈ real time.
+
+**The header, field by field:**
+
+| field | meaning |
+|---|---|
+| `sim t` | simulated time (steps × 20 ms). On a physical robot this trajectory would take the same wall-clock time — the whole handover is ~6.5 s |
+| `50 Hz` | the control loop: one action consumed every 20 ms of sim time |
+| `policy X ms` | wall time to obtain **that step's** action (CUDA-synced, RTX 2000 Ada). Mostly ~1 ms — the policy pops a precomputed action from its queue; the ~14 ms spikes are **chunk boundaries**, where the full network runs once and refills the next ~100 actions. That visible pop-vs-refill rhythm *is* action chunking — the mechanism the edge deployment leans on |
+| `reward N/4` | gym-aloha's contact-based progress ladder: 1 = right gripper touches the cube, 2 = lifted off the table, 3 = left gripper touches it, 4 = left arm holds it alone → **SUCCESS**. An episode counts as a success iff it reaches 4 |
+
+After success the sim runs ~1.5 s longer (so the GIF doesn't cut at the handover instant) and
+holds the final frame. Regenerate with your own checkpoint —
+`python scripts/make_demo_gif.py --mode rollout --policy-path <ckpt> --task "<instruction>"` —
+which is exactly what happens to this GIF once the SmolVLA fine-tune lands.
+
+---
+
 ## Why this project
 
 The role this targets emphasizes *real-time / on-device / edge constraints* and *strong
