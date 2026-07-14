@@ -239,12 +239,21 @@ Results live in [benchmarks/results/](benchmarks/results/) and are summarized in
 ```
 smolvla-edge-nx/
 ├── src/smolvla_edge/      # infer / eval / bench entrypoints + shared utils
-├── scripts/               # train.sh and other thin CLI wrappers
-├── configs/               # training + eval YAML configs
+│                          #   eval.py: closed-loop gym-aloha rollouts (make_sim_stepper
+│                          #   handles old- and new-format checkpoints transparently)
+├── scripts/               # train.sh, setup_sim.sh, make_demo_gif.py (rollout GIFs)
+├── notebooks/             # 01/02: Transformer->SmolVLA from-scratch tutorials;
+│                          #   colab_train_smolvla_aloha.ipynb: the Colab fine-tune (T4/A100)
+├── configs/               # training configs (aloha_sim primary, so101 kept for later)
+├── docker/ + docker-compose.yml   # the preferred env: matched mujoco 2.3.7 container;
+│                          #   services: verify / eval / infer / train / bench / shell
+├── data/                  # dataset tarballs for Drive/Colab staging   (gitignored)
+├── models/                # pretrained-model cache tarball for Colab   (gitignored)
+├── outputs/               # local training checkpoints                 (gitignored)
 ├── deploy/
 │   ├── ondevice/          # Xavier NX on-device notes, quantization/TRT attempts
 │   └── client_server/     # gRPC server (workstation) + client (NX), proto
-└── benchmarks/            # benchmark harness + results table
+└── benchmarks/            # bench harness + results (summary.csv, demo.gif)
 ```
 
 Project plans, design, specs, and the phased task list live in
