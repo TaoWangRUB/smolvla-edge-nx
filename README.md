@@ -70,7 +70,7 @@ edge deployment and latency engineering.
 
 ## Roadmap
 
-Progress: **15 / 27 tasks** — details in
+Progress: **17 / 27 tasks** — details in
 [the change tasks](openspec/changes/smolvla-edge-deployment/tasks.md).
 
 **Current milestone — the head-to-head: fine-tuned SmolVLA vs pretrained ACT on
@@ -81,7 +81,7 @@ Progress: **15 / 27 tasks** — details in
 | Phase | What | Status | Notes |
 |-------|------|--------|-------|
 | 0 | **Scaffold + environment** — repo, pins, host env, **Docker env** | ✅ 6/6 | matched-mujoco container built & verified |
-| 1 | **Correctness (sim)** — verify-first → fine-tune → head-to-head eval | 🔄 4/6 | ✅ verify-first, smoke fine-tune, obs-mapping, ACT baseline **65 %** (n=20). 🔄 A100 fine-tune in flight → 2.5 head-to-head eval |
+| 1 | **Correctness (sim)** — verify-first, fine-tune SmolVLA, closed-loop eval | ✅ 6/6 | **Deliverable: fine-tuned SmolVLA 70 % success** (transfer cube, 20 eps, matched mujoco) vs official ACT baseline **65 %** on identical seeds; trained 20k steps on Colab A100 |
 | 2 | **Edge deployment** (optional) — Xavier NX on-device + client/server | ⏸ 0/7 | parked until a Jetson NX is on hand; chunking, low-Hz VLM, INT8-where-it-converts |
 | 3 | **Benchmarks + writeup** — latency table + demo GIF + narrative | 🔄 2/5 | ✅ demo GIF (policy rollout w/ latency overlay), collate; latency rows for BOTH architectures measured; narrative awaits the head-to-head number |
 
