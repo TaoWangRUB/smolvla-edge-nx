@@ -19,16 +19,33 @@ The Xavier NX edge phase is fully specced and kicks in whenever a Jetson is on h
 
 ![This repo's fine-tuned SmolVLA running the bimanual cube transfer closed-loop, with sim-time, control rate, per-step policy latency and task reward overlaid](benchmarks/results/demo_smolvla.gif)
 
-**What you're watching.** **This repo's fine-tuned SmolVLA** (450 M params, language-conditioned,
-fine-tuned on a **Colab A100** — 20 k steps, batch 64, ~2.5 h, via
-`notebooks/colab_train_smolvla_aloha.ipynb`) running **closed-loop** in the
-`gym_aloha/AlohaTransferCube-v0` MuJoCo environment, driven through this repo's eval harness
-(`scripts/make_demo_gif.py --mode rollout`). Two ViperX arms, **14 degrees of freedom**, a single
-480×640 top camera, instruction: *"Pick up the cube with the right arm and transfer it to the left
-arm."* A real rollout — every action comes from the network reading image + joint state at 50 Hz.
-Playback ≈ real time. Note the latency rhythm: ~5–7 ms queue-pop steps punctuated by a **~300 ms
-VLM prefill** at chunk boundaries — that spike *is* the on-device challenge, and why Phase 2 runs
-the VLM at low Hz behind action chunking.
+**What you're watching.** This repo's **fine-tuned SmolVLA** completing the bimanual cube
+transfer **closed-loop** in `gym_aloha/AlohaTransferCube-v0`, rendered by the eval harness
+(`scripts/make_demo_gif.py --mode rollout`). Not a replayed demonstration — every action is
+produced by the network from the current camera image + joint state.
+
+- **Model:** SmolVLA, 450 M params (SmolVLM-2 backbone + flow-matching action expert),
+  language-conditioned — instruction: *"Pick up the cube with the right arm and transfer it
+  to the left arm."*
+- **Fine-tune:** single **Colab A100**, **20 k steps**, batch 64, **~2.5 h**
+  (`notebooks/colab_train_smolvla_aloha.ipynb`)
+- **Scene:** two ViperX arms (14 DoF total), one 480×640 top camera
+- **Result:** **70 % success** over 20 episodes — vs 65 % for the ACT baseline (see Results)
+
+**Timing, plainly.** The **control frequency is 50 Hz**: the robot consumes one action every
+**20 ms**. The VLA does *not* run the full network every step — it predicts a **chunk of 50
+actions at once** and plays them from a queue:
+
+| what | measured (RTX 2000 Ada) | vs the 20 ms budget |
+|---|---|---|
+| per-step action fetch (queue pop) | ~5–7 ms | fits |
+| full VLA inference at a chunk boundary (VLM prefill + action expert) | **~300 ms** | ≈ 15 control periods |
+| amortized over the 50-action chunk | ~6 ms per action | fits |
+
+So the expensive VLM effectively runs at **~1 Hz** while the arm moves at 50 Hz. Run
+synchronously, the robot would freeze ~0.3 s at every chunk boundary — decoupling prediction
+from execution (async chunking) hides it, and doing that within 8 GB is exactly Phase 2's job.
+Both numbers are visible live in the GIF header.
 
 For comparison, the **ACT baseline** (~52 M task-specific specialist) through the identical
 harness — far cheaper per step, but no language conditioning and a lower success rate (see
@@ -42,13 +59,12 @@ Results):
 |---|---|
 | `sim t` | simulated time (steps × 20 ms). On a physical robot this trajectory would take the same wall-clock time — the whole handover is ~6.5 s |
 | `50 Hz` | the control loop: one action consumed every 20 ms of sim time |
-| `policy X ms` | wall time to obtain **that step's** action (CUDA-synced, RTX 2000 Ada). Mostly ~1 ms — the policy pops a precomputed action from its queue; the ~14 ms spikes are **chunk boundaries**, where the full network runs once and refills the next ~100 actions. That visible pop-vs-refill rhythm *is* action chunking — the mechanism the edge deployment leans on |
+| `policy X ms` | wall time to obtain **that step's** action (CUDA-synced, RTX 2000 Ada). SmolVLA: ~5–7 ms queue pops, **~300 ms** chunk-boundary refills. ACT baseline: ~1 ms pops, ~14 ms refills. That pop-vs-refill rhythm *is* action chunking |
 | `reward N/4` | gym-aloha's contact-based progress ladder: 1 = right gripper touches the cube, 2 = lifted off the table, 3 = left gripper touches it, 4 = left arm holds it alone → **SUCCESS**. An episode counts as a success iff it reaches 4 |
 
 After success the sim runs ~1.5 s longer (so the GIF doesn't cut at the handover instant) and
-holds the final frame. Regenerate with your own checkpoint —
-`python scripts/make_demo_gif.py --mode rollout --policy-path <ckpt> --task "<instruction>"` —
-which is exactly what happens to this GIF once the SmolVLA fine-tune lands.
+holds the final frame. Regenerate with any checkpoint:
+`python scripts/make_demo_gif.py --mode rollout --policy-path <ckpt> --task "<instruction>"`.
 
 ---
 
