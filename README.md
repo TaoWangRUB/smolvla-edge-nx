@@ -143,6 +143,9 @@ docker compose run --rm verify          # pretrained ACT, transfer cube -> ~80% 
 docker compose run --rm infer
 
 # 2. Fine-tune SmolVLA on the ALOHA sim dataset (run on a big GPU; see configs/train.aloha_sim.yaml).
+#    Local smoke run: BATCH_SIZE=4 STEPS=1000 docker compose run --rm train
+#    Full 20k-step run on Colab: notebooks/colab_train_smolvla_aloha.ipynb (same lerobot
+#    version as the container -> the checkpoint drops straight into eval below)
 docker compose run --rm train
 
 # 3. Evaluate YOUR checkpoint closed-loop in sim -> the success-rate deliverable.
