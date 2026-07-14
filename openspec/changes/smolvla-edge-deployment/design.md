@@ -134,6 +134,29 @@ Ada, headless EGL):
    services (`verify`, `eval`, `infer`, `train`, `bench`, `shell`). Train and evaluate inside the
    container so data generation and eval share one mujoco.
 
+## Colab training — verified findings
+
+Standing up the 20k-step fine-tune on Colab (notebook `notebooks/colab_train_smolvla_aloha.ipynb`)
+surfaced its own set of hard-won facts:
+
+1. **HF Xet downloads are unreliable from Colab.** Xet-backed files (dataset parquets, model
+   safetensors) throttle to ~KB/s unauthenticated, 403 via the xet-bridge with lerobot's pinned
+   hub 0.35 ("invalid key pair id"), and stall mid-file even authenticated with a current client;
+   plain-CDN files (MP4s) download fine — hence wildly confusing mixed symptoms. Resolution:
+   **stage everything from Drive tarballs** packaged from the local (working) machine — dataset
+   (~90 MB) + model caches (~1.6 GB) — and verify tarball completeness by loading the FULL dataset
+   through LeRobotDataset before packaging (a partial bench-download tarball caused a mid-run fetch).
+2. **lerobot-train refuses any pre-existing output dir** without `--resume` — even an empty one
+   just created for a tee log. Console logs must be written NEXT TO the output dir; the notebook
+   wipes checkpoint-less leftover dirs and protects dirs holding real checkpoints.
+3. **Version triangle**: lerobot 0.5.x needs py>=3.12; Colab is py3.12, so the notebook uses
+   lerobot 0.4.4 (same as the Docker image) making the checkpoint drop-in compatible with local
+   eval. huggingface_hub must stay <0.36 (a `-U` to hub 1.x breaks lerobot + transformers).
+4. **Warmup auto-scales with run length** (1000 steps → 6 for a 200-step dry run, → 666 for 20k),
+   so early-step losses are not comparable across run lengths.
+5. **Hardware economics measured**: T4 5.35 s/step @ batch 32 (~30 h for 20k) vs A100 0.45 s/step
+   @ batch 64 (~2.5 h). Dry-run on T4, full run on A100.
+
 ## Risks / Trade-offs
 
 - **Full TensorRT of a SmolVLM-2 + flow-matching VLA is non-trivial** → Don't claim a clean
