@@ -42,20 +42,32 @@ edge deployment and latency engineering.
 
 ## Roadmap
 
-Progress: **12 / 25 tasks** — details in
+Progress: **15 / 27 tasks** — details in
 [the change tasks](openspec/changes/smolvla-edge-deployment/tasks.md).
+
+**Current milestone — the head-to-head: fine-tuned SmolVLA vs pretrained ACT on
+`AlohaTransferCube-v0`, identical 20-episode protocol.** Baseline is locked:
+**ACT 13/20 = 65 %**. The SmolVLA 20k-step fine-tune is running on a Colab A100
+(`notebooks/colab_train_smolvla_aloha.ipynb`; ~2.5 h at 2.2 steps/s, loss 0.05 by step 1.2k).
 
 | Phase | What | Status | Notes |
 |-------|------|--------|-------|
-| 0 | **Scaffold + environment** — repo, pins, host env, **Docker env** | ✅ 6/6 | matched-mujoco container built & verified; showcase task = ALOHA sim insertion |
-| 1 | **Correctness (sim)** — verify-first, then fine-tune SmolVLA + closed-loop eval | 🔄 2/5 | ✅ verify-first: pretrained ACT **80 %** transfer-cube in-container (60 % on host mujoco 3.x). ⬜ fine-tune (needs a big GPU) → eval → success-rate deliverable |
+| 0 | **Scaffold + environment** — repo, pins, host env, **Docker env** | ✅ 6/6 | matched-mujoco container built & verified |
+| 1 | **Correctness (sim)** — verify-first → fine-tune → head-to-head eval | 🔄 4/6 | ✅ verify-first, smoke fine-tune, obs-mapping, ACT baseline **65 %** (n=20). 🔄 A100 fine-tune in flight → 2.5 head-to-head eval |
 | 2 | **Edge deployment** (optional) — Xavier NX on-device + client/server | ⏸ 0/7 | parked until a Jetson NX is on hand; chunking, low-Hz VLM, INT8-where-it-converts |
-| 3 | **Benchmarks + writeup** — latency table + demo GIF + narrative | ⬜ 0/5 | local-GPU tier + demo GIF runnable now; narrative needs the fine-tune numbers |
+| 3 | **Benchmarks + writeup** — latency table + demo GIF + narrative | 🔄 2/5 | ✅ demo GIF (policy rollout w/ latency overlay), collate; latency rows for BOTH architectures measured; narrative awaits the head-to-head number |
 
-**Verified so far:** the full sim/eval pipeline works end-to-end with pretrained checkpoints
-(`docker compose run --rm verify`), and the matched-simulator container measurably matters
-(80 % vs 60 % on the same checkpoint). The remaining critical path is one GPU fine-tune
-(~4 h on an A100) and the evaluation + writeup that follow from it.
+**Measured so far** (RTX 2000 Ada, matched-mujoco container):
+
+| | ACT (80 M specialist) | SmolVLA (450 M generalist) |
+|---|---|---|
+| transfer-cube success (20 eps) | **65 %** | ⏳ training |
+| select_action mean / throughput | 0.68 ms / 1474 Hz | 27.7 ms / 36 Hz (chunk-boundary VLM prefill dominates) |
+| peak GPU memory | 266 MB | 927 MB |
+
+Training pipeline hardening from the Colab sessions (HF Xet downloads unreliable from Colab →
+datasets/models staged from Drive tarballs; full findings in
+[the change design](openspec/changes/smolvla-edge-deployment/design.md)).
 
 ---
 
