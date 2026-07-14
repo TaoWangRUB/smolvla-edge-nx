@@ -48,3 +48,6 @@ benchmarks/results/raw/
 
 # Keep these placeholder dirs tracked
 !**/.gitkeep
+data/*.tar.gz
+smolvla_models_cache.tar.gz
+aloha_sim_insertion_human
