@@ -64,15 +64,31 @@ def run(args) -> dict:
     ds = load_dataset(args.dataset_repo_id, episodes=list(range(args.episodes)))
     timer = Timer(device=device)
 
+    # Same input adaptation as infer.py: remap dataset image keys onto the policy's expected
+    # features when the names differ, and pre-tokenize the task string for language-conditioned
+    # policies (SmolVLA reads observation.language.tokens; lerobot 0.4.x has no processor here).
+    from .common import make_language_tokenizer
+
+    key_map: dict[str, str] = {}
+    img_feats = sorted(getattr(policy.config, "image_features", []) or [])
+    ds_img_keys = sorted(k for k in ds[0] if "image" in k.lower())
+    if img_feats and not any(k in ds_img_keys for k in img_feats):
+        key_map = dict(zip(ds_img_keys, img_feats))
+        print(f"[bench] remapping dataset image keys -> policy features: {key_map}")
+    tokenize = make_language_tokenizer(policy, device)
+
     # Warmup (excluded from stats) — first calls JIT/allocate and would skew p95.
     policy.reset()
     n_total = min(len(ds), args.steps + args.warmup)
     for i in range(n_total):
         frame = ds[i]
         batch = {
-            k: (v.to(device).unsqueeze(0) if isinstance(v, torch.Tensor) else v)
+            key_map.get(k, k): (v.to(device).unsqueeze(0) if isinstance(v, torch.Tensor) else v)
             for k, v in frame.items()
         }
+        if tokenize is not None:
+            task = frame.get("task") or "do the task"
+            batch.update(tokenize(task if isinstance(task, str) else str(task)))
         if i < args.warmup:
             with torch.no_grad(), autocast_ctx:
                 policy.select_action(batch)
