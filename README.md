@@ -20,7 +20,8 @@ The Xavier NX edge phase is fully specced and kicks in whenever a Jetson is on h
 ![This repo's fine-tuned SmolVLA running the bimanual cube transfer closed-loop, with sim-time, control rate, per-step policy latency and task reward overlaid](benchmarks/results/demo_smolvla.gif)
 
 **What you're watching.** **This repo's fine-tuned SmolVLA** (450 M params, language-conditioned,
-trained in `notebooks/colab_train_smolvla_aloha.ipynb`) running **closed-loop** in the
+fine-tuned on a **Colab A100** — 20 k steps, batch 64, ~2.5 h, via
+`notebooks/colab_train_smolvla_aloha.ipynb`) running **closed-loop** in the
 `gym_aloha/AlohaTransferCube-v0` MuJoCo environment, driven through this repo's eval harness
 (`scripts/make_demo_gif.py --mode rollout`). Two ViperX arms, **14 degrees of freedom**, a single
 480×640 top camera, instruction: *"Pick up the cube with the right arm and transfer it to the left
@@ -84,7 +85,9 @@ Progress: **18 / 27 tasks** — details in
 **Headline result — the head-to-head is in: the fine-tuned SmolVLA wins.** On
 `AlohaTransferCube-v0`, identical 20-episode protocol, matched simulator:
 **SmolVLA 14/20 = 70 %** vs **ACT baseline 13/20 = 65 %** — the language-conditioned
-generalist beats the task-specific specialist, at ~40× the inference compute. That compute
+generalist beats the task-specific specialist, at ~40× the inference compute. The SmolVLA
+checkpoint was fine-tuned on a **single Colab A100** (20 k steps, batch 64, ~2.5 h); all
+evaluation and latency numbers below come from the local RTX 2000 Ada container. That compute
 gap (36 Hz ceiling vs the 50 Hz control loop) is exactly what the edge phase exists to close.
 
 | Phase | What | Status | Notes |
@@ -94,9 +97,9 @@ gap (36 Hz ceiling vs the 50 Hz control loop) is exactly what the edge phase exi
 | 2 | **Edge deployment** (optional) — Xavier NX on-device + client/server | ⏸ 0/7 | parked until a Jetson NX is on hand; chunking, low-Hz VLM, INT8-where-it-converts |
 | 3 | **Benchmarks + writeup** — latency table + demo GIF + narrative | 🔄 3/5 | ✅ demo GIFs (fine-tuned SmolVLA + ACT baseline, latency overlays), collate, narrative through Phase 1; NX benchmark tiers pending hardware |
 
-**Measured so far** (RTX 2000 Ada, matched-mujoco container):
+**Measured so far** (evaluated on RTX 2000 Ada, matched-mujoco container; SmolVLA trained on a Colab A100):
 
-| | ACT (80 M specialist) | SmolVLA (450 M generalist) |
+| | ACT (80 M specialist, official pretrained) | SmolVLA (450 M generalist, fine-tuned on A100) |
 |---|---|---|
 | transfer-cube success (20 eps) | 65 % | **70 %** |
 | select_action mean / throughput | 0.68 ms / 1474 Hz | 27.7 ms / 36 Hz (chunk-boundary VLM prefill dominates) |
