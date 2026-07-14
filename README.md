@@ -38,7 +38,7 @@ actions at once** and plays them from a queue:
 
 | what | measured (RTX 2000 Ada) | vs the 20 ms budget |
 |---|---|---|
-| per-step action fetch (queue pop) | ~5–7 ms | fits |
+| per-step overhead between boundaries (image→tensor, normalize, tokenize — the queue pop itself is ~µs and the network does **not** run) | ~5–7 ms | fits; mostly wasted work on these steps — an easy Phase-2 trim, since the popped action never uses the fresh observation |
 | full VLA inference at a chunk boundary (VLM prefill + action expert) | **~300 ms** | ≈ 15 control periods |
 | average compute per action (one 300 ms inference yields 50 actions: 300 ÷ 50) | ~6 ms | fits — the GPU produces actions faster than the robot consumes them, *on average* |
 
