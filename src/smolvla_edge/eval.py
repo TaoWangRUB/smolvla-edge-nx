@@ -309,6 +309,123 @@ def eval_sim(
     }
 
 
+def eval_sim_async(
+    policy,
+    policy_path: str,
+    device,
+    env_id: str,
+    task: str,
+    n_episodes: int,
+    max_steps: int,
+    obs_type: str = "pixels_agent_pos",
+    g: float = 0.7,
+    epsilon: float = 0.0,
+    fps: float = 50.0,
+    aggregate: str = "new_wins",
+    idle: str = "hold",
+    save_traces: bool = False,
+    precision: str = "fp32",
+    flow_steps: int | None = None,
+    server: str | None = None,
+    ramp_in: int = 0,
+) -> dict:
+    """Closed-loop rollout under the async inference stack (SmolVLA §3.3, Algorithm 1).
+
+    Same env/success protocol as `eval_sim` (identical seeds, reward>=4 == success), but the
+    policy serves full action chunks from a background worker and the client loop pops one
+    action per control tick. Idle ticks (queue empty before the next chunk lands, in virtual
+    time at `fps`) execute a hold action — the sim analogue of the robot standing still.
+    `--g 0` is the paper's sequential (sync) limit of the same loop.
+    """
+    import gymnasium as gym
+    import gym_aloha  # noqa: F401  # registers the gym_aloha/* env ids
+
+    from .async_infer import AsyncRunner, make_chunk_predictor
+
+    if server:
+        from .remote import make_remote_chunk_predictor, split_latency_summary
+
+        predict = make_remote_chunk_predictor(server, task or None)
+        print(f"[eval] chunk predictor: remote PolicyServer at {server}")
+    else:
+        if flow_steps is not None:
+            if not hasattr(policy.config, "num_steps"):
+                raise SystemExit("--flow-steps only applies to flow-matching policies (SmolVLA)")
+            policy.config.num_steps = flow_steps
+        predict = make_chunk_predictor(policy, policy_path, device, task or None,
+                                       precision=precision)
+    runner = AsyncRunner(predict, g=g, epsilon=epsilon, dt=1.0 / fps,
+                         aggregate=aggregate, idle=idle, ramp_in=ramp_in)
+    # override the env's registered 400-step TimeLimit: under the fixed-time
+    # protocol idle ticks eat into the budget, so the cap must be ours
+    env = gym.make(env_id, obs_type=obs_type, render_mode="rgb_array",
+                   max_episode_steps=max_steps)
+    episodes: list[dict] = []
+    try:
+        # warmup: the first CUDA call pays compile/alloc cost (~3x a warm call);
+        # keep it out of episode latency stats and out of episode 0's queue timing
+        warm_obs, _ = env.reset(seed=0)
+        predict(warm_obs)
+        for ep in range(n_episodes):
+            obs, _ = env.reset(seed=ep)
+            if policy is not None:
+                policy.reset()
+            runner.start_episode(obs)
+            last_action = None
+            ep_max_r, success_tick = 0.0, None
+            for _ in range(max_steps):
+                action, _ev = runner.act(obs)
+                if action is None:  # idle tick: hold the last commanded pose
+                    action = last_action
+                last_action = action
+                obs, reward, terminated, truncated, _ = env.step(action)
+                ep_max_r = max(ep_max_r, float(reward))
+                if success_tick is None and float(reward) >= 4.0:
+                    success_tick = runner.tick
+                if terminated or truncated:
+                    break
+            stats = runner.episode_stats()
+            stats.update(episode=ep, max_reward=ep_max_r,
+                         success=ep_max_r >= 4.0, success_tick=success_tick)
+            if save_traces:
+                stats["trace"] = runner.trace
+            episodes.append(stats)
+            print(f"[eval] episode {ep + 1}/{n_episodes}: max_reward={ep_max_r:.1f} "
+                  f"success={ep_max_r >= 4.0} idle={stats['idle_ticks']} "
+                  f"sent={stats['obs_sent']} success_tick={success_tick}")
+    finally:
+        env.close()
+        runner.close()
+
+    n = len(episodes)
+    successes = sum(e["success"] for e in episodes)
+    ticks_to_success = [e["success_tick"] for e in episodes if e["success_tick"] is not None]
+
+    def mean(xs):
+        return sum(xs) / len(xs) if xs else float("nan")
+
+    return {
+        "mode": "sim-async",
+        "env_id": env_id,
+        "inference": {"g": g, "epsilon": epsilon, "fps": fps,
+                      "aggregate": aggregate, "idle": idle, "precision": precision,
+                      "flow_steps": flow_steps},
+        "episodes": n,
+        "successes": successes,
+        "success_rate": successes / n if n else float("nan"),
+        "mean_max_reward": mean([e["max_reward"] for e in episodes]),
+        "mean_ticks_to_success": mean(ticks_to_success),
+        "mean_idle_ticks": mean([e["idle_ticks"] for e in episodes]),
+        "mean_obs_sent": mean([e["obs_sent"] for e in episodes]),
+        "mean_obs_filtered": mean([e["obs_filtered"] for e in episodes]),
+        "mean_latency_s": mean([e["mean_latency_s"] for e in episodes]),
+        "median_latency_s": mean([e["median_latency_s"] for e in episodes]),
+        "per_episode": episodes,
+        **({"remote": split_latency_summary(predict.calls)} if server else {}),
+        "note": "async inference stack (Algorithm 1); success = gym-aloha reward>=4",
+    }
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(description="Evaluate a SmolVLA checkpoint.")
     ap.add_argument("--policy-path", required=True)
@@ -321,6 +438,33 @@ def main() -> None:
     ap.add_argument("--env-id", default="gym_aloha/AlohaInsertion-v0", help="(sim) gym env id")
     ap.add_argument("--task", default="insert the peg into the socket", help="(sim) instruction")
     ap.add_argument("--obs-type", default="pixels_agent_pos", help="(sim) gym-aloha obs_type")
+    ap.add_argument("--inference", choices=["sync", "async"], default="sync",
+                    help="(sim) sync = legacy select_action loop; async = Algorithm 1 stack")
+    ap.add_argument("--g", type=float, default=0.7,
+                    help="(async) queue threshold in [0,1]; 0 = sequential/sync limit")
+    ap.add_argument("--epsilon", type=float, default=0.0,
+                    help="(async) joint-space similarity filter; 0 disables")
+    ap.add_argument("--fps", type=float, default=50.0,
+                    help="(async) control rate defining the virtual-time tick (ALOHA: 50)")
+    ap.add_argument("--aggregate", choices=["new_wins", "blend"], default="new_wins",
+                    help="(async) chunk aggregation f on overlapping timesteps")
+    ap.add_argument("--idle", choices=["hold", "freeze"], default="hold",
+                    help="(async) hold = emulate idle ticks; freeze = legacy frozen-env")
+    ap.add_argument("--precision", choices=["fp32", "fp16"], default="fp32",
+                    help="(async) fp16 = autocast around chunk prediction (cuts l_S)")
+    ap.add_argument("--flow-steps", type=int, default=None,
+                    help="(async, SmolVLA) override flow-matching denoising steps; "
+                    "the expert dominates l_S (~29 ms/step measured), not the VLM")
+    ap.add_argument("--server", default=None,
+                    help="(async) host:port of a gRPC PolicyServer; chunks are "
+                    "computed remotely (separate process/host — no GIL contention)")
+    ap.add_argument("--ramp-in", type=int, default=0,
+                    help="(async) blend this many post-merge actions from the last "
+                    "executed action, smoothing splice discontinuities")
+    ap.add_argument("--out", default=None,
+                    help="write the full result (incl. per-episode stats) to this JSON file")
+    ap.add_argument("--save-traces", action="store_true",
+                    help="(async) include per-tick queue traces in --out (Figure-3 data)")
     ap.add_argument(
         "--policy-type",
         default="auto",
@@ -330,9 +474,21 @@ def main() -> None:
     ap.add_argument("--device", default="auto")
     args = ap.parse_args()
 
-    policy, device = load_policy(args.policy_path, args.device, args.policy_type)
+    if args.mode == "sim" and args.inference == "async" and args.server:
+        policy, device = None, "remote"  # thin client: the server owns the policy
+    else:
+        policy, device = load_policy(args.policy_path, args.device, args.policy_type)
 
-    if args.mode == "sim":
+    if args.mode == "sim" and args.inference == "async":
+        result = eval_sim_async(
+            policy, args.policy_path, device, args.env_id, args.task,
+            args.episodes, args.max_steps, args.obs_type,
+            g=args.g, epsilon=args.epsilon, fps=args.fps,
+            aggregate=args.aggregate, idle=args.idle, save_traces=args.save_traces,
+            precision=args.precision, flow_steps=args.flow_steps, server=args.server,
+            ramp_in=args.ramp_in,
+        )
+    elif args.mode == "sim":
         result = eval_sim(
             policy, args.policy_path, device, args.env_id, args.task,
             args.episodes, args.max_steps, args.obs_type,
@@ -341,8 +497,19 @@ def main() -> None:
         ds = load_dataset(args.dataset_repo_id, episodes=list(range(args.episodes)))
         result = eval_replay(policy, device, ds, args.threshold, args.max_frames)
 
+    if args.out:
+        import json
+        import os
+
+        os.makedirs(os.path.dirname(args.out) or ".", exist_ok=True)
+        with open(args.out, "w") as f:
+            json.dump(result, f, indent=2)
+        print(f"[eval] wrote {args.out}")
+
     print("[eval] result:")
     for k, v in result.items():
+        if k == "per_episode":
+            continue  # bulky; in --out JSON
         print(f"  {k}: {v}")
 
 

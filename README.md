@@ -267,6 +267,119 @@ See [deploy/README.md](deploy/README.md).
 
 ---
 
+## Asynchronous inference — the paper's Algorithm 1, reproduced in sim
+
+SmolVLA's async inference stack (paper §3.3) decouples action *execution* from chunk
+*prediction*: a `RobotClient` pops one action per control tick from a queue and, when the
+queue drops below a threshold `g·n`, sends the current observation to a (possibly remote)
+`PolicyServer` — **without stopping**. The new chunk is merged into the queue when it
+arrives. Synchronous inference is the `g = 0` limit: drain all 50 actions, stand idle
+while the next chunk computes.
+
+**Headline result** (fine-tuned SmolVLA, transfer cube, 20 episodes, identical seeds,
+fixed 700-tick budget, policy served by a separate process at 3 flow steps — in-loop
+chunk latency ≈ 0.45 s):
+
+| Mode | Success | Ticks-to-success | Idle ticks/ep |
+|---|---|---|---|
+| Idealized (frozen env — inference is free) | 16/20 = 80% | 272 | 0 |
+| Sync (`--g 0`, pays latency honestly) | 13/20 = 65% | 407 | 178 |
+| **Async (`--g 0.5 --ramp-in 5`)** | **14/20 = 70%** | **329** | 78 |
+
+**Success parity, 19% faster time-to-success** — the paper's Figure-5 claim, measured
+end-to-end in simulation. Queue dynamics match the paper's Figure 3 (sync's dead
+zero-dwells vs async's floor-avoiding zigzag; right plot is the stack under a synthetic
+140 ms server, proving the implementation reproduces the paper's exact shapes when the
+server is fast):
+
+| measured (fs3, g=0 vs g=0.5) | synthetic 140 ms server (g=0 / 0.7 / 1.0) |
+|---|---|
+| ![measured queue trace](benchmarks/results/async_queue_trace.png) | ![synthetic queue trace](benchmarks/results/async_queue_trace_synthetic.png) |
+
+### How it works
+
+```mermaid
+flowchart LR
+    subgraph CLIENT["Client process — python -m smolvla_edge.eval --inference async --server host:50051"]
+        direction TB
+        LOOP["eval loop, one 20 ms control tick:<br/>action = runner.act(obs)<br/>None ⇒ repeat last action (hold)<br/>obs = env.step(action)"]
+        subgraph RUNNER["AsyncRunner — Algorithm 1, order of checks per tick"]
+            direction TB
+            DELIVER["1. DELIVER if pending chunk arrived:<br/>fresh = chunk[pops:] — skip already-executed prefix<br/>queue = f(old, fresh), then ramp-in eases 5 ticks<br/>from the last executed action"]
+            POP["2. POP — PopFront(queue), execute this tick"]
+            TRIG["3. TRIGGER if queue/n &lt; g and none in flight:<br/>ε joint-space duplicate filter,<br/>must-go when queue is empty"]
+            IDLE["4. IDLE — queue empty, nothing arrived ⇒ None"]
+            DELIVER --> POP --> TRIG --> IDLE
+        end
+        WORKER["worker thread, max 1 in flight —<br/>measures wall latency L;<br/>virtual clock: chunk usable at<br/>tick T + ceil(L / 20 ms), never earlier"]
+        LOOP <--> RUNNER
+        TRIG -. "observation" .-> WORKER
+        WORKER -. "merged chunk" .-> DELIVER
+    end
+    subgraph SERVER["PolicyServer process, GPU — python -u deploy/client_server/server.py --flow-steps 3"]
+        direction TB
+        RPC["gRPC PredictChunk(Observation)"]
+        PIPE["saved processor pipeline:<br/>rename keys · tokenize task · normalize"]
+        MODEL["SmolVLA.predict_action_chunk:<br/>VLM prefill ~40 ms + flow steps ~30 ms each"]
+        OUT["unnormalize → ActionChunk 50×14<br/>+ recv/send timestamps (latency split)"]
+        RPC --> PIPE --> MODEL --> OUT
+    end
+    WORKER == "Observation: top camera + joints + task (~0.9 MB, ~2.3 ms on localhost)" ==> RPC
+    OUT == "ActionChunk" ==> WORKER
+```
+
+Same algorithm as [lerobot's `async_inference`](https://github.com/huggingface/lerobot/tree/main/src/lerobot/async_inference)
+(threshold trigger, skip-executed-timesteps, overlap aggregation, duplicate filter with
+must-go), with three deliberate differences:
+
+| Aspect | lerobot (real robot) | this repo (sim) |
+|---|---|---|
+| Clock | real wall clock at robot fps | **virtual tick clock**: mujoco freezes while the policy computes, so a chunk that took `L` seconds is delivered `ceil(L/Δt)` ticks after its trigger — idle is measured honestly regardless of simulator speed |
+| Transport | 2 persistent gRPC streams + receiver thread | 1 unary `PredictChunk` per request (equivalent at one-in-flight) |
+| Splice seam | none | **`--ramp-in`** — eases the first 5 post-merge actions from the last executed action |
+
+### What the paper doesn't tell you (measured here)
+
+1. **The operating envelope is a hard inequality.** No-starvation needs `g·n·Δt ≥ ℓ`;
+   no-perpetual-replanning needs `(1−g)·n·Δt ≥ ℓ`. Both ⇒ **ℓ < n·Δt/2** (500 ms at
+   n=50, 50 Hz). Outside it there is *no* good `g`: at ℓ ≈ 0.9 s async scored 45% vs
+   sync's 65%. Getting inside took a separate server process (in-process inference
+   contends with mujoco for the CPU: 333 ms exclusive → 1.0 s in-loop) and 3 flow steps
+   instead of 10 (136 ms exclusive; quality unchanged — 80% frozen-env floor at 3, 5,
+   and 10 steps alike; fp16 autocast measured *slower* on this launch-bound GPU).
+2. **Deep splices need seam smoothing.** Each merge executes `chunk[k:]` — the tail of a
+   trajectory whose first `k ≈ ℓ/Δt` actions were never followed. With absolute
+   joint-position targets, the few-degree disagreement at the seam is a torque spike,
+   ~14–19×/episode: async scored 40% *inside* the latency envelope until `--ramp-in 5`
+   (100 ms of linear easing) recovered 70%. Ruled out first, 20 episodes each:
+   aggregation choice (blend ≈ replace), replan frequency (g 0.5 vs 0.7), and
+   flow-matching noise (fixed seed: no change). lerobot's `weighted_average` smooths
+   chunk-vs-chunk overlap but not this executed-vs-new seam — invisible at their
+   few-tick splice depths, decisive at ours.
+
+Reproduce (two shells inside `docker compose run --rm shell`):
+
+```bash
+# shell 1 — policy server (GPU process)
+python -u deploy/client_server/server.py \
+  --policy-path outputs/train/smolvla_transfer_cube/checkpoints/020000 \
+  --precision fp32 --flow-steps 3 --port 50051
+
+# shell 2 — async client (add --g 0 for the sync baseline)
+python -m smolvla_edge.eval \
+  --policy-path outputs/train/smolvla_transfer_cube/checkpoints/020000 \
+  --mode sim --inference async --g 0.5 --ramp-in 5 --server localhost:50051 \
+  --env-id gym_aloha/AlohaTransferCube-v0 --episodes 20 --max-steps 700 \
+  --task "Pick up the cube with the right arm and transfer it to the left arm." \
+  --out benchmarks/results/raw/async_g05.json --save-traces
+
+# queue-trace plot (paper Fig. 3)
+python benchmarks/plot_async_queue.py benchmarks/results/raw/async_g05.json \
+  --out benchmarks/results/async_queue_trace.png
+```
+
+---
+
 ## Benchmarks (Phase 3 — the centerpiece)
 
 The headline artifact is a results table across deployment tiers plus a short GIF of the
@@ -285,6 +398,8 @@ smolvla-edge-nx/
 ├── src/smolvla_edge/      # infer / eval / bench entrypoints + shared utils
 │                          #   eval.py: closed-loop gym-aloha rollouts (make_sim_stepper
 │                          #   handles old- and new-format checkpoints transparently)
+│                          #   async_infer.py: AsyncRunner (paper Alg. 1) + chunk predictor
+│                          #   remote.py: gRPC chunk predictor (thin client half)
 ├── scripts/               # train.sh, setup_sim.sh, make_demo_gif.py (rollout GIFs)
 ├── notebooks/             # 01/02: Transformer->SmolVLA from-scratch tutorials;
 │                          #   colab_train_smolvla_aloha.ipynb: the Colab fine-tune (T4/A100)

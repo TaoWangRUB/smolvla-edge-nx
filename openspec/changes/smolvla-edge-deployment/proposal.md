@@ -31,6 +31,10 @@ checkpoint fast, then spend the real effort on edge deployment and latency engin
 ### New Capabilities
 - `smolvla-finetuning`: validate the LeRobot/SmolVLA stack and fine-tune a correct ALOHA-sim
   checkpoint, reporting a closed-loop success rate from gym-aloha rollouts (no robot).
+- `async-sim-inference`: reproduce the SmolVLA paper's asynchronous inference stack (§3.3,
+  Algorithm 1) fully in simulation — action queue + threshold `g`, joint-space similarity
+  filter, chunk aggregation on overlap, paced control loop — and compare sync vs async on
+  success rate and time-to-completion (no hardware required; the on-device phase reuses it).
 - `edge-ondevice-inference`: run the fine-tuned policy entirely on a Jetson Xavier NX (8 GB)
   under real-time constraints using chunking, a low-Hz VLM stage, and FP16/INT8 precision.
 - `edge-client-server`: offload inference to a workstation over gRPC with the NX as a thin
