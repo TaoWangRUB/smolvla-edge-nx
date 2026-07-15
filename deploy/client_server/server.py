@@ -36,14 +36,64 @@ from smolvla_edge.common import load_policy  # noqa: E402
 
 
 class PolicyServicer(policy_pb2_grpc.PolicyServicer):
-    def __init__(self, policy_path: str, device: str, precision: str):
+    def __init__(self, policy_path: str, device: str, precision: str,
+                 flow_steps: int | None = None, noise_seed: int | None = None):
         self.policy_path = policy_path
         self.precision = precision
         self.policy, self.device = load_policy(policy_path, device)
         if precision == "fp16":
             self.policy = self.policy.half()
+        if flow_steps is not None:
+            self.policy.config.num_steps = flow_steps
+        self.noise_seed = noise_seed
         self.policy.reset()
+        # chunk predictors for the async stack, built lazily per task string so
+        # the observation->policy mapping matches the local eval path exactly
+        self._chunk_predictors: dict[str, object] = {}
         print(f"[server] loaded {policy_path} on {self.device} ({precision})")
+
+    def _chunk_predictor(self, task: str):
+        if task not in self._chunk_predictors:
+            from smolvla_edge.async_infer import make_chunk_predictor
+
+            self._chunk_predictors[task] = make_chunk_predictor(
+                self.policy, self.policy_path, self.device, task or None,
+                precision="fp32",  # server-side autocast measured slower; keep native
+            )
+        return self._chunk_predictors[task]
+
+    @staticmethod
+    def _to_gym_obs(request):
+        """Rebuild the gym-aloha style obs dict the chunk predictor expects."""
+        import numpy as np
+
+        obs: dict = {"pixels": {}}
+        for img in request.images:
+            arr = np.frombuffer(img.data, dtype=np.uint8).reshape(tuple(img.shape))
+            key = img.key.split(".")[-1]  # "observation.images.top" / "pixels.top" -> "top"
+            obs["pixels"][key] = arr
+        for tn in request.tensors:
+            key = tn.key.split(".")[-1]  # "observation.state" -> "state"; "agent_pos" kept
+            key = "agent_pos" if key in ("state", "agent_pos") else key
+            obs[key] = np.asarray(tn.data, dtype=np.float32).reshape(tuple(tn.shape))
+        return obs
+
+    def PredictChunk(self, request, context):
+        recv = time.time()
+        if self.noise_seed is not None:
+            # fixed flow-matching noise: consecutive chunks from nearby states
+            # become near-identical trajectories, so mid-chunk splices stay
+            # coherent (tests the multimodality-splice failure mode)
+            import torch
+
+            torch.manual_seed(self.noise_seed)
+        chunk = self._chunk_predictor(request.task)(self._to_gym_obs(request))
+        return policy_pb2.ActionChunk(
+            data=chunk.reshape(-1).tolist(),
+            shape=list(chunk.shape),
+            server_recv_ts=recv,
+            server_send_ts=time.time(),
+        )
 
     def _to_batch(self, obs):
         import numpy as np
@@ -91,13 +141,19 @@ def main() -> None:
     ap.add_argument("--policy-path", required=True)
     ap.add_argument("--device", default="auto")
     ap.add_argument("--precision", choices=["fp32", "fp16"], default="fp16")
+    ap.add_argument("--flow-steps", type=int, default=None,
+                    help="(SmolVLA) override flow-matching denoising steps")
+    ap.add_argument("--noise-seed", type=int, default=None,
+                    help="fix flow-matching noise per chunk (coherent splices)")
     ap.add_argument("--port", type=int, default=50051)
     ap.add_argument("--workers", type=int, default=4)
     args = ap.parse_args()
 
     server = grpc.server(futures.ThreadPoolExecutor(max_workers=args.workers))
     policy_pb2_grpc.add_PolicyServicer_to_server(
-        PolicyServicer(args.policy_path, args.device, args.precision), server
+        PolicyServicer(args.policy_path, args.device, args.precision, args.flow_steps,
+                       args.noise_seed),
+        server,
     )
     server.add_insecure_port(f"[::]:{args.port}")
     server.start()

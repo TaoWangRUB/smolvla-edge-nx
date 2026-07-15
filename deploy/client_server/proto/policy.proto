@@ -10,6 +10,12 @@ service Policy {
   // One observation in, one action (or action chunk) out.
   rpc SelectAction(Observation) returns (ActionChunk);
 
+  // Async-inference stack (SmolVLA §3.3): one observation in, the FULL action
+  // chunk out, produced by the checkpoint-aware chunk predictor (processor
+  // pipeline / normalization handled server-side). The RobotClient's queue,
+  // threshold g, similarity filter and aggregation all stay client-side.
+  rpc PredictChunk(Observation) returns (ActionChunk);
+
   // Reset policy internal state (action queue, etc.) at episode boundaries.
   rpc Reset(ResetRequest) returns (ResetReply);
 

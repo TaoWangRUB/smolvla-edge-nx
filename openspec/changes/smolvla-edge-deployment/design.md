@@ -81,6 +81,20 @@ the NX client replays held-out frames as observations and reports round-trip lat
 server-compute vs. network overhead. Chosen to mirror real offload deployments and to add a second
 benchmark tier cheaply.
 
+**Async inference in sim (paper §3.3, Algorithm 1) — pacing is the crux.** The SmolVLA async
+stack decouples chunk prediction from action execution: the client pops actions from a queue,
+and when the remaining fraction drops below `g` it captures an observation (filtered for
+joint-space near-duplicates within `ε`) and triggers a non-blocking prediction; the new chunk
+is aggregated with the live queue on overlapping timesteps. The subtlety in sim: gym-aloha
+steps as fast as the CPU allows and blocks during inference, so a naive port shows no benefit.
+We therefore pace the client loop at the env's nominal control rate (Δt, 50 Hz for ALOHA) and
+run prediction in a background worker; "idle ticks" (queue empty at a tick boundary) become the
+sim-measurable analogue of the robot standing still, matching the paper's `g ≥ E[ℓ_S]/Δt/n`
+analysis. Sync inference is the `g = 0` limit of the same loop — one code path, no separate
+baseline implementation. The in-process worker and the remote gRPC server expose the same
+interface, so the identical `RobotClient` later runs on a Jetson unchanged (hardware phase is
+deferred to the end of the task list).
+
 **Benchmark harness owns honesty.** `smolvla_edge.bench` drops per-run JSON into
 `benchmarks/results/raw/`; `benchmarks/collate.py` regenerates `summary.csv` and the markdown table.
 The harness refuses naive INT8 casts so the INT8 row can only be filled by a real engine.
