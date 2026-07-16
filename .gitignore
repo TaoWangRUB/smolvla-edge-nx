@@ -40,6 +40,9 @@ models/
 
 # Benchmarks: keep curated results/*.md & *.csv, ignore raw dumps
 benchmarks/results/raw/
+# Per-episode ROS2 GIFs are large (~1.5 MB each); kept local for eyeball checks, not in git
+benchmarks/results/ros2/gifs_50/
+benchmarks/results/ros2/gif_smoke/
 
 # Editor / OS
 .idea/

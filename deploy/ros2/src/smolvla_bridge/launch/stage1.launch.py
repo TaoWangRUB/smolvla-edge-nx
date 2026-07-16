@@ -25,6 +25,7 @@ ARGS = [
     ("max_steps", "400"),
     ("results_path", "/workspace/benchmarks/results/ros2/stage1.json"),
     ("events_path", "/workspace/benchmarks/results/ros2/stage1_events.jsonl"),
+    ("gif_dir", ""),
 ]
 
 
@@ -59,6 +60,7 @@ def generate_launch_description() -> LaunchDescription:
                 "server": cfg["sim_server"], "fps": cfg["fps"],
                 "episodes": cfg["episodes"], "start_seed": cfg["start_seed"],
                 "max_steps": cfg["max_steps"], "results_path": cfg["results_path"],
+                "gif_dir": cfg["gif_dir"],
             }],
         ),
     ])

@@ -130,6 +130,7 @@ private:
 
   void on_observation(const SimObservation & msg)
   {
+    const auto proc_t0 = Clock::now();
     // new episode == episode counter change only: the bridge re-publishes the tick-0
     // observation during the cold-start wait, and those must NOT reset our pending request
     if (msg.episode != episode_) {
@@ -167,6 +168,7 @@ private:
     }
 
     ev.queue_after = static_cast<int32_t>(queue_.size());
+    ev.proc_ms = std::chrono::duration<double, std::milli>(Clock::now() - proc_t0).count();
     event_pub_->publish(ev);
   }
 
