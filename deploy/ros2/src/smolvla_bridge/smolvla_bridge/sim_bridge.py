@@ -50,6 +50,9 @@ class SimBridge(Node):
         self.declare_parameter("start_seed", 0)
         self.declare_parameter("max_steps", 400)
         self.declare_parameter("results_path", "")
+        # per-episode GIF of the rendered top camera (empty = off). Frames come free: the
+        # bridge already forwards the rendered RGB frame in every /observation.
+        self.declare_parameter("gif_dir", "")
 
         self.server = self.get_parameter("server").value
         self.fps = float(self.get_parameter("fps").value)
@@ -57,6 +60,7 @@ class SimBridge(Node):
         self.start_seed = int(self.get_parameter("start_seed").value)
         self.max_steps = int(self.get_parameter("max_steps").value)
         self.results_path = self.get_parameter("results_path").value
+        self.gif_dir = self.get_parameter("gif_dir").value
 
         channel = grpc.insecure_channel(self.server)
         grpc.channel_ready_future(channel).result(timeout=30)
@@ -80,6 +84,14 @@ class SimBridge(Node):
         self.ep_idle = 0
         self.ep_start_wall = 0.0
         self.tick_wall_times: list[float] = []
+        # timing decomposition (ros2-cpp-async-deployment, 6.6 Hz root-cause):
+        #   step_ms  = gRPC Step round trip to sim-server (sim physics+render+pack+network)
+        #   dds_rt_ms = obs publish -> matching /action received (DDS obs out + client node
+        #               processing + DDS action back) — the transport leg profile_tick can't see
+        self.step_ms: list[float] = []
+        self.dds_rt_ms: list[float] = []
+        self.obs_pub_time = 0.0
+        self.ep_frames: list[np.ndarray] = []  # rendered top-cam frames for the episode GIF
         self.results: list[dict] = []
         self.done = False
 
@@ -89,6 +101,9 @@ class SimBridge(Node):
     # -- helpers ---------------------------------------------------------------------------
 
     def _on_action(self, msg: Float32MultiArray) -> None:
+        # DDS round trip: this action is the client's answer to the obs we last published.
+        if self.obs_pub_time:
+            self.dds_rt_ms.append((time.monotonic() - self.obs_pub_time) * 1e3)
         self.fresh_action = np.asarray(msg.data, dtype=np.float32)
 
     def _publish_obs(self, obs_msg: policy_pb2.Observation, tick: int) -> None:
@@ -108,6 +123,38 @@ class SimBridge(Node):
         self.obs_pub.publish(out)
         self.obs_pub_time = time.monotonic()
 
+    def _record_frame(self, obs_msg: policy_pb2.Observation) -> None:
+        if not self.gif_dir:
+            return
+        img = obs_msg.images[0]
+        h, w, c = img.shape
+        self.ep_frames.append(
+            np.frombuffer(img.data, dtype=np.uint8).reshape(h, w, c).copy())
+
+    def _write_gif(self, seed: int, success: bool) -> str | None:
+        if not self.gif_dir or not self.ep_frames:
+            return None
+        from PIL import Image as PILImage
+
+        out_dir = Path(self.gif_dir)
+        out_dir.mkdir(parents=True, exist_ok=True)
+        tag = "success" if success else "fail"
+        path = out_dir / f"ep{self.episode:02d}_seed{seed:02d}_{tag}.gif"
+        # stride to ~12.5 fps and cap the long side at 360 px so 50 gifs stay small
+        stride = 2
+        frames = self.ep_frames[::stride]
+        pil = []
+        for f in frames:
+            im = PILImage.fromarray(f)
+            if max(im.size) > 360:
+                s = 360 / max(im.size)
+                im = im.resize((int(im.width * s), int(im.height * s)))
+            pil.append(im.convert("P", palette=PILImage.ADAPTIVE))
+        # ~40 ms measured tick cadence * stride -> roughly real-time playback
+        pil[0].save(path, save_all=True, append_images=pil[1:],
+                    duration=stride * 40, loop=0, optimize=True)
+        return str(path)
+
     def _reset_episode(self) -> None:
         self.episode += 1
         seed = self.start_seed + self.episode
@@ -120,20 +167,26 @@ class SimBridge(Node):
         self.ep_idle = 0
         self.ep_start_wall = time.monotonic()
         self.tick_wall_times = []
+        self.ep_frames = []
+        self._record_frame(rep.observation)
         self._publish_obs(rep.observation, rep.tick)
         self.get_logger().info(f"episode {self.episode + 1}/{self.n_episodes} (seed={seed})")
 
     def _finish_episode(self, success: bool) -> None:
         wall = time.monotonic() - self.ep_start_wall
         jitter = np.diff(self.tick_wall_times) if len(self.tick_wall_times) > 2 else np.array([0.0])
+        seed = self.start_seed + self.episode
+        gif = self._write_gif(seed, success)
         result = {
-            "episode": self.episode, "seed": self.start_seed + self.episode,
+            "episode": self.episode, "seed": seed,
             "success": bool(success), "max_reward": float(self.ep_max_r),
             "ticks": int(self.tick), "idle_ticks": int(self.ep_idle),
             "wall_s": round(wall, 3),
             "tick_ms_p50": round(float(np.percentile(jitter, 50)) * 1e3, 3),
             "tick_ms_p95": round(float(np.percentile(jitter, 95)) * 1e3, 3),
         }
+        if gif:
+            result["gif"] = gif
         self.results.append(result)
         self.get_logger().info(
             f"episode {self.episode + 1}: success={success} max_reward={self.ep_max_r:.1f} "
@@ -151,6 +204,15 @@ class SimBridge(Node):
     def _write_results(self) -> None:
         n = len(self.results)
         succ = sum(r["success"] for r in self.results)
+
+        def _stats(xs: list[float]) -> dict:
+            if not xs:
+                return {"n": 0}
+            a = np.asarray(xs)
+            return {"n": int(a.size), "p50": round(float(np.percentile(a, 50)), 3),
+                    "p95": round(float(np.percentile(a, 95)), 3),
+                    "mean": round(float(a.mean()), 3)}
+
         summary = {
             "mode": "ros2-stage",
             "env_id": self.spec.env_id,
@@ -158,6 +220,11 @@ class SimBridge(Node):
             "success_rate": succ / n if n else float("nan"),
             "mean_idle_ticks": float(np.mean([r["idle_ticks"] for r in self.results])),
             "fps": self.fps,
+            # timing decomposition of the control tick (all ms):
+            "timing_ms": {
+                "grpc_step": _stats(self.step_ms),   # sim-server round trip (physics+render+net)
+                "dds_roundtrip": _stats(self.dds_rt_ms),  # obs->action DDS + client node
+            },
             "per_episode": self.results,
             "note": "ROS2 bridge closed-loop; success = gym-aloha reward>=4",
         }
@@ -196,9 +263,12 @@ class SimBridge(Node):
         self.last_action = action
         self.tick_wall_times.append(time.monotonic())
 
+        _t_step = time.monotonic()
         rep = self.stub.Step(policy_pb2.SimStepRequest(action=action.ravel().tolist()))
+        self.step_ms.append((time.monotonic() - _t_step) * 1e3)
         self.tick = rep.tick
         self.ep_max_r = max(self.ep_max_r, rep.reward)
+        self._record_frame(rep.observation)
         if rep.terminated or rep.truncated or self.tick >= self.max_steps:
             self._finish_episode(self.ep_max_r >= 4.0)
         else:

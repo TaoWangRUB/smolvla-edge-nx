@@ -27,6 +27,7 @@ class EventRecorder(Node):
             "episode": ev.episode, "tick": ev.tick, "queue": ev.queue_depth,
             "queue_after": ev.queue_after, "sent": ev.sent, "filtered": ev.filtered,
             "merged": ev.merged, "idle": ev.idle,
+            "proc_ms": round(ev.proc_ms, 4),
             **({"latency_s": round(ev.rtt_s, 4)} if ev.rtt_s else {}),
         }) + "\n")
         self.fh.flush()
