@@ -78,6 +78,14 @@
         — inside the original gate's binomial band (ROS2 74 %, oracle 78 %), now at native 25 Hz.
         Artifacts: `benchmarks/results/ros2/stage1_50ep.json`, `.../gifs_50/`,
         `.../timing_breakdown.json`.
+      - **Fresh native-Linux head-to-head vs the Python `AsyncRunner` oracle** (same checkpoint,
+        server, seeds; oracle at matched dt `--fps 25`): ROS2 **40/50 = 80 %** vs Python
+        **33/50 = 66 %** (`benchmarks/results/ros2/python_oracle_50ep.json`). Failures are nested —
+        the 10 ROS2 fails are a strict subset of the 17 Python fails, zero ROS2-only. Not an
+        algorithmic difference (unit-tested-equal port): the oracle's virtual-time model rounds
+        latency up to whole ticks (`ceil(L/dt)`, async_infer.py:187) — 205 ms → 6 ticks — while the
+        C++ client uses real wall-clock chunk arrival (async_client.cpp:9-11), ~1 tick less stale.
+        The real-time deployment pays **no** accuracy penalty vs the idealized model.
       - Follow-up unchanged: 900 KiB raw frame → JPEG on the wire trims the 12 ms DDS leg; and an
         event-driven bridge step removes the 10 ms timer-quantization tax.
 

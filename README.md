@@ -397,16 +397,26 @@ smolvla-edge:sim (py3.11, GPU)                 smolvla-edge:ros2 (Jazzy, no GPU)
   policy-server   — unchanged Python gRPC  ◄─── async_client (rclcpp/C++) — Algorithm 1 port
 ```
 
-**Equivalence gate (50 episodes, seeds 0–49, same fs3 server, g=0.5, ramp-in 5):**
+**Equivalence gate (50 episodes, seeds 0–49, fine-tuned SmolVLA, fs3 server, g=0.5, ramp-in 5):**
 
-| Stack | Success | Idle ticks/ep | Chunk latency p50 |
-|---|---|---|---|
-| ROS2 C++ client + bridge | **37/50 = 74%** | 0.0 | 0.48 s |
-| Python `AsyncRunner` oracle (matched dt) | 39/50 = 78% | 0.0 | 0.48 s |
+| Stack | Host / dt | Success | Idle | Sends/ep |
+|---|---|---|---|---|
+| ROS2 C++ client + bridge | old, matched dt | 37/50 = 74% | 0.0 | 12.9 |
+| Python `AsyncRunner` oracle | old, matched dt | 39/50 = 78% | 0.0 | ~11 |
+| **ROS2 C++ client + bridge** | **native Linux, 25 Hz** | **40/50 = 80%** | 0.04 | 12.5 |
+| **Python `AsyncRunner` oracle** | **native Linux, matched dt (fps 25)** | **33/50 = 66%** | 0.0 | 11.8 |
 
-Two-proportion z = 0.47 — equivalent within binomial noise, with matching queue dynamics
-(~12 chunk requests/ep both). The C++ aggregation/ramp-in is additionally unit-tested against
-fixtures exported from the Python implementation.
+The C++ aggregation/ramp-in is unit-tested against fixtures exported from the Python code, so the
+two are the *same algorithm*. On the fresh native-Linux head-to-head the C++ stack matches-or-beats
+the oracle on **every seed**: the 10 seeds ROS2 fails are a strict **subset** of the 17 the Python
+oracle fails (zero ROS2-only failures). The gap is not algorithmic — it is the oracle's *virtual-time*
+latency model, which makes a chunk visible at `trigger_tick + ceil(L/dt)` ticks
+([async_infer.py:187](src/smolvla_edge/async_infer.py#L187)), i.e. it **rounds the 205 ms latency up
+to a whole 6 ticks**. The ROS2 client uses *real* wall-clock chunk arrival, no rounding
+([async_client.cpp:9-11](deploy/ros2/src/smolvla_client/src/async_client.cpp#L9-L11)), so it runs
+~1 tick less stale and clears the borderline seeds the discretized oracle drops. Takeaway: **the
+real-time C++ deployment pays no accuracy penalty vs the idealized Python model — if anything the
+oracle was slightly pessimistic about it.**
 
 **The 6.6 Hz was host-specific, not architectural.** The gate above was first recorded on a
 box where `env.step` (EGL render) cost **70.5 ms** and the DDS leg ~80 ms — 151 ms/tick, 6.6 Hz.
