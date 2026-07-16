@@ -92,6 +92,57 @@ services:
       - -lc
       - python -m smolvla_edge.bench ${BENCH_ARGS:---help}
 
+  # --- ROS2 async deployment (openspec: ros2-cpp-async-deployment) ------------------------
+  # Topology (design D1): gRPC is the only protocol crossing containers; DDS stays inside
+  # the `ros2` service. sim-server/policy-server run in the py3.11 sim image (GPU); the ROS2
+  # nodes run in the Jazzy overlay image (no GPU in Stage 1).
+
+  # Existing Python gRPC policy server, unchanged (Stage 1 oracle; Stage 2 A/B baseline).
+  # Default: the fine-tuned transfer-cube deliverable (70% success @ 20k steps).
+  # --precision fp32 on purpose: PredictChunk's chunk predictor runs native precision
+  # (server.py pins fp32); fp16 weights crash it with Float-vs-Half.
+  #   POLICY_PATH=outputs/train/smolvla_aloha/checkpoints/last docker compose up policy-server
+  policy-server:
+    <<: *smolvla
+    command:
+      - bash
+      - -lc
+      - >
+        python -u deploy/client_server/server.py
+        --policy-path ${POLICY_PATH:-outputs/train/smolvla_transfer_cube/checkpoints/020000}
+        --precision fp32 --port 50051 ${POLICY_SERVER_ARGS:-}
+
+  # gym-aloha behind the SimEnv gRPC service (deploy/client_server/sim_server.py); keeps the
+  # mujoco-2.3.7/py3.11 sim inside its matched container.
+  sim-server:
+    <<: *smolvla
+    command:
+      - bash
+      - -lc
+      - python -u deploy/client_server/sim_server.py --port 50052 ${SIM_SERVER_ARGS:-}
+
+  # ROS2 Jazzy overlay (docker/ros2.Dockerfile, FROM ackermann_rover_x86_64_jazzy): rclpy
+  # sim bridge + rclcpp async client. No nvidia runtime on purpose (spec ros2-docker-env).
+  ros2:
+    image: smolvla-edge:ros2
+    build:
+      context: .
+      dockerfile: docker/ros2.Dockerfile
+    working_dir: /workspace
+    stdin_open: true
+    tty: true
+    stop_signal: SIGINT
+    environment:
+      PYTHONPATH: /workspace/src:/workspace/deploy/client_server
+      # DDS stays inside THIS container (design D1). Without this, two concurrent
+      # `compose run ros2` containers discover each other over the compose network's
+      # multicast and cross-wire their topics.
+      ROS_AUTOMATIC_DISCOVERY_RANGE: LOCALHOST
+      ROS_LOCALHOST_ONLY: "1"
+    volumes:
+      - ./:/workspace
+    command: bash
+
 volumes:
   hf-cache:
   torch-cache:

@@ -380,6 +380,90 @@ python benchmarks/plot_async_queue.py benchmarks/results/raw/async_g05.json \
 
 ---
 
+## ROS2 C++ deployment (Stage 1 — production-shaped async stack)
+
+The async client side of Algorithm 1, re-implemented as a **ROS2 Jazzy C++ node** driving the
+same gRPC policy server — the robot-industry shape: C++ real-time control layer, RPC boundary,
+Python-free client. Spec/design/tasks live in
+[openspec/changes/ros2-cpp-async-deployment/](openspec/changes/ros2-cpp-async-deployment/).
+
+Because the sim is locked to the py3.11 container (mujoco 2.3.7 match) and ROS2 Jazzy is a
+py3.12/24.04 world, the architecture is multi-container with **gRPC as the only thing that
+crosses container boundaries** (DDS stays inside the ROS2 container):
+
+```
+smolvla-edge:sim (py3.11, GPU)                 smolvla-edge:ros2 (Jazzy, no GPU)
+  sim-server      — gym-aloha behind SimEnv ◄─── sim_bridge (rclpy)  — owns the tick contract
+  policy-server   — unchanged Python gRPC  ◄─── async_client (rclcpp/C++) — Algorithm 1 port
+```
+
+**Equivalence gate (50 episodes, seeds 0–49, same fs3 server, g=0.5, ramp-in 5):**
+
+| Stack | Success | Idle ticks/ep | Chunk latency p50 |
+|---|---|---|---|
+| ROS2 C++ client + bridge | **37/50 = 74%** | 0.0 | 0.48 s |
+| Python `AsyncRunner` oracle (matched dt) | 39/50 = 78% | 0.0 | 0.48 s |
+
+Two-proportion z = 0.47 — equivalent within binomial noise, with matching queue dynamics
+(~12 chunk requests/ep both). The C++ aggregation/ramp-in is additionally unit-tested against
+fixtures exported from the Python implementation.
+
+**The honest caveat — effective control rate is 6.6 Hz, not 50 Hz** (measured 151.6 ms/tick
+over 15 769 gate ticks). Profiled breakdown (`deploy/client_server/profile_tick.py`):
+`env.step` with EGL camera render costs **70.5 ms p50 by itself** (this sim on this box caps
+at ~14 Hz before any communication), gRPC adds ~1 ms (cross-container ≈ localhost), and the
+ROS2 leg — moving a 900 KiB raw frame through rclpy→DDS→C++ plus bridge scheduling — accounts
+for the remaining ~80 ms. So the *comparison* above is run at matched dt (`--fps 6.62`) where
+latency-in-ticks is equal; a wall-clock 50 Hz claim needs a faster sim render and compressed
+image transport (recorded follow-up). On a real robot the sim+render cost disappears — the
+C++ client's own per-tick work is sub-millisecond.
+
+Reproduce:
+
+```bash
+# one-time: build the ROS2 image (thin overlay on a Jazzy dev image) and the workspace
+docker compose build ros2
+docker compose run --rm ros2 bash -c 'cd deploy/ros2 && colcon build --symlink-install'
+docker compose run --rm ros2 bash -c 'cd deploy/ros2 && colcon test --packages-select smolvla_client && colcon test-result'
+
+# regenerate Python stubs after any proto change (writes deploy/client_server/policy_pb2*.py)
+docker compose run --rm shell bash deploy/client_server/gen_proto.sh
+
+# servers (fs3 = inside the 50 Hz latency envelope; fp32 — see compose comment)
+POLICY_SERVER_ARGS="--flow-steps 3" docker compose up -d policy-server sim-server
+
+# validate the SimEnv shim is transparent (byte-identical obs/rewards vs in-process env)
+docker compose run --rm shell python deploy/client_server/sim_env_check.py \
+  --server sim-server:50052 --transparency-steps 100
+
+# the Stage-1 stack: bridge + C++ async client + event recorder (results + events JSONL out)
+docker compose run --rm ros2 ros2 launch smolvla_bridge stage1.launch.py \
+  episodes:=50 g:=0.5 ramp_in:=5 \
+  results_path:=/workspace/benchmarks/results/ros2/stage1_gate_fs3.json \
+  events_path:=/workspace/benchmarks/results/ros2/stage1_gate_fs3_events.jsonl \
+  task:="Pick up the cube with the right arm and transfer it to the left arm."
+
+# the Python oracle at matched dt, same server/seeds (the equivalence baseline)
+docker compose run --rm eval bash -lc "python -u -m smolvla_edge.eval --mode sim \
+  --inference async --g 0.5 --ramp-in 5 --fps 6.62 --server policy-server:50051 \
+  --policy-path outputs/train/smolvla_transfer_cube/checkpoints/020000 \
+  --env-id gym_aloha/AlohaTransferCube-v0 --episodes 50 --max-steps 400 \
+  --task 'Pick up the cube with the right arm and transfer it to the left arm.'"
+
+# tick-cost profile (where the 151 ms goes)
+docker compose run --rm shell python deploy/client_server/profile_tick.py --local
+docker compose run --rm ros2  python3 deploy/client_server/profile_tick.py --server sim-server:50052
+
+docker compose down   # when finished
+```
+
+Results: [benchmarks/results/ros2/](benchmarks/results/ros2/). Next stages (see
+[tasks](openspec/changes/ros2-cpp-async-deployment/tasks.md)): ONNX export with an enforced
+parity gate, a C++ ONNX Runtime inference server behind the same proto, and a one-command
+gated deployment pipeline.
+
+---
+
 ## Benchmarks (Phase 3 — the centerpiece)
 
 The headline artifact is a results table across deployment tiers plus a short GIF of the
@@ -404,15 +488,19 @@ smolvla-edge-nx/
 ├── notebooks/             # 01/02: Transformer->SmolVLA from-scratch tutorials;
 │                          #   colab_train_smolvla_aloha.ipynb: the Colab fine-tune (T4/A100)
 ├── configs/               # training configs (aloha_sim primary, so101 kept for later)
-├── docker/ + docker-compose.yml   # the preferred env: matched mujoco 2.3.7 container;
+├── docker/ + docker-compose.yml   # matched mujoco 2.3.7 sim container + ROS2 Jazzy overlay;
 │                          #   services: verify / eval / infer / train / bench / shell
+│                          #   + policy-server / sim-server / ros2 (ROS2 stack)
 ├── data/                  # dataset tarballs for Drive/Colab staging   (gitignored)
 ├── models/                # pretrained-model cache tarball for Colab   (gitignored)
 ├── outputs/               # local training checkpoints                 (gitignored)
 ├── deploy/
 │   ├── ondevice/          # Xavier NX on-device notes, quantization/TRT attempts
-│   └── client_server/     # gRPC server (workstation) + client (NX), proto
-└── benchmarks/            # bench harness + results (summary.csv, demo.gif)
+│   ├── client_server/     # gRPC server (workstation) + client, proto (Policy + SimEnv),
+│   │                      #   sim_server.py (gym-aloha shim), profile_tick.py
+│   └── ros2/              # colcon ws: smolvla_msgs / smolvla_bridge (rclpy tick owner)
+│                          #   / smolvla_client (rclcpp Algorithm-1 port + gtest)
+└── benchmarks/            # bench harness + results (summary.csv, demo.gif, results/ros2/)
 ```
 
 Project plans, design, specs, and the phased task list live in
