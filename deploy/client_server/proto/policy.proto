@@ -52,6 +52,44 @@ message ActionChunk {
   double server_send_ts = 4;
 }
 
+// gym-aloha behind gRPC (openspec: ros2-cpp-async-deployment, design D2). The sim is locked
+// inside the py3.11 sim container (mujoco 2.3.7 match); this service is how the ROS2 container
+// reaches it. Observation reuses the message above; packing follows remote.py's conventions
+// (Image key "pixels.top" raw_uint8 HWC, Tensor key "agent_pos").
+service SimEnv {
+  // Env metadata the bridge needs before the first Reset.
+  rpc Spec(SimSpecRequest) returns (SimSpecReply);
+
+  // Start an episode; deterministic when 'seed' is set (mirrors eval.py's reset(seed=ep)).
+  rpc SimReset(SimResetRequest) returns (SimResetReply);
+
+  // Advance one control tick with one action [action_dim].
+  rpc Step(SimStepRequest) returns (SimStepReply);
+}
+
+message SimSpecRequest {}
+message SimSpecReply {
+  string env_id = 1;      // e.g. "gym_aloha/AlohaTransferCube-v0"
+  string obs_type = 2;    // e.g. "pixels_agent_pos"
+  int32 action_dim = 3;   // 14 for ALOHA
+  int32 max_steps = 4;    // TimeLimit the server constructed the env with
+}
+
+message SimResetRequest { optional int64 seed = 1; }
+message SimResetReply {
+  Observation observation = 1;
+  int64 tick = 2;          // 0 after reset
+}
+
+message SimStepRequest { repeated float action = 1; }
+message SimStepReply {
+  Observation observation = 1;
+  float reward = 2;        // gym-aloha: success == reward >= 4
+  bool terminated = 3;
+  bool truncated = 4;
+  int64 tick = 5;
+}
+
 message ResetRequest {}
 message ResetReply { bool ok = 1; }
 
