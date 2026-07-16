@@ -413,28 +413,30 @@ box where `env.step` (EGL render) cost **70.5 ms** and the DDS leg ~80 ms — 15
 Re-run on a **native Linux host with a real GPU** (RTX A2000 Laptop, FastDDS `rmw_fastrtps_cpp`,
 `deploy/client_server/profile_tick.py` + in-loop instrumentation), the *same* stack runs at
 **40.0 ms/tick = 25 Hz** and both dominant costs collapse ~10×. Measured over a 50-episode
-closed-loop re-run (seeds 0–49, 15 080 ticks, `g=0.5`, ramp-in 5; policy =
-`act_aloha_sim_transfer_cube_human` since the fine-tuned SmolVLA checkpoint didn't survive the
-host move — cadence is policy-agnostic because inference is off the tick's critical path). That
-run scored **46/50 = 92 %, mean idle 0.04 ticks/ep**, one GIF per episode under
-`benchmarks/results/ros2/gifs_50/`. Decomposition of one control tick:
+closed-loop re-run with the **fine-tuned SmolVLA deliverable** (seeds 0–49, ~15 250 ticks, fs3
+server `--flow-steps 3 --precision fp32`, `g=0.5`, ramp-in 5). That run scored **40/50 = 80 %,
+mean idle 0.04 ticks/ep, 12.5 chunk requests/ep** — inside the original gate's binomial band
+(recorded ROS2 74 %, Python oracle 78 %), now at native 25 Hz instead of the old 6.6 Hz. One GIF
+per episode is written under `benchmarks/results/ros2/gifs_50/` (`ep<NN>_seed<NN>_<success|fail>`).
+Decomposition of one control tick (cadence is policy-agnostic — inference is off the critical path):
 
 | Tick segment | p50 | On the critical path? |
 |---|---:|---|
 | Sim + rendering (`env.step`, mujoco + EGL) | 7.3 ms | yes |
-| gRPC `Step` bridge↔sim-server, in-loop (sim + pack + net + contention) | 18.3 ms | yes |
-| Comm bridge↔client over DDS — 900 KiB obs out + action back | 11.7 ms | yes |
+| gRPC `Step` bridge↔sim-server, in-loop (sim + pack + net + contention) | 16.0 ms | yes |
+| Comm bridge↔client over DDS — 900 KiB obs out + action back | 11.6 ms | yes |
 | ROS2 C++ node (`on_observation` compute) | 0.06 ms | yes |
-| Sum of real work | ~30 ms | |
-| Timer quantization (30 ms rounded to 2× the 20 ms/50 Hz timer) | +10 ms | |
+| Sum of real work | ~28 ms | |
+| Timer quantization (28 ms rounded to 2× the 20 ms/50 Hz timer) | +12 ms | |
 | **Tick cadence** | **40.0 ms (25 Hz)** | |
-| *PredictChunk RTT client↔policy-server* | *81.6 ms* | **no — async worker thread** |
+| *PredictChunk RTT client↔policy-server (SmolVLA fs3)* | *229 ms* | **no — async worker thread** |
 
 So the tick is **not** DDS-image-transport-bound here (DDS is only ~12 ms); the biggest single
-lever is the bridge's fixed 50 Hz wall timer, which rounds 30 ms of real work up to 40 ms — an
-event-driven step would give ~33 Hz for free. The **async design works exactly as intended**:
-the 82 ms server latency is fully hidden behind queue execution (idle = 0 on every real tick),
-which is the whole point of Algorithm 1. The C++ node's own per-tick work is 0.06 ms. Artifacts:
+lever is the bridge's fixed 50 Hz wall timer, which rounds ~28 ms of real work up to 40 ms — an
+event-driven step would give ~35 Hz for free. The **async design works exactly as intended**:
+the 229 ms fs3 server latency is fully hidden behind queue execution (idle = 0 on every real tick,
+g=0.5 refetch at ~1 s of buffer), which is the whole point of Algorithm 1. The C++ node's own
+per-tick work is 0.06 ms. Artifacts:
 [timing_breakdown.json](benchmarks/results/ros2/timing_breakdown.json),
 [stage1_50ep.json](benchmarks/results/ros2/stage1_50ep.json) (per-episode success/reward/ticks).
 
@@ -465,10 +467,10 @@ docker compose run --rm ros2 ros2 launch smolvla_bridge stage1.launch.py \
   gif_dir:=/workspace/benchmarks/results/ros2/gifs_50 \
   task:="Pick up the cube with the right arm and transfer it to the left arm."
 
-# NOTE: outputs/train/smolvla_transfer_cube is gitignored and did not survive a host move; the
-# timing re-run above used POLICY_PATH=lerobot/act_aloha_sim_transfer_cube_human (an ALOHA
-# checkpoint). lerobot/smolvla_base is the 3-camera SO-101 model and rejects ALOHA's single top
-# camera — use a matched checkpoint, or re-fine-tune, to reproduce the fs3-SmolVLA success gate.
+# NOTE: outputs/train/smolvla_transfer_cube is gitignored — restore the fine-tuned checkpoint to
+# outputs/train/smolvla_transfer_cube/checkpoints/020000/pretrained_model/ before running (the
+# loader descends into pretrained_model/). lerobot/smolvla_base will NOT work here: it is the
+# 3-camera SO-101 model and rejects ALOHA's single top camera.
 
 # the Python oracle at matched dt, same server/seeds (the equivalence baseline)
 docker compose run --rm eval bash -lc "python -u -m smolvla_edge.eval --mode sim \
