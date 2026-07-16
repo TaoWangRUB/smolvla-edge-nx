@@ -67,16 +67,17 @@
       - **The 6.6 Hz did not reproduce — same stack now runs 40.0 ms/tick = 25 Hz.** The old
         151 ms was host-specific: `env.step` EGL render 70.5 ms → **7.3 ms** here, and the DDS
         leg ~80 ms → **~12 ms** here (both ~10× faster on a real GPU + fast intra-host DDS).
-      - Measured tick decomposition (1324 ticks): gRPC `Step` 18.3 ms + DDS 900 KiB round trip
-        11.7 ms + C++ node 0.06 ms = ~30 ms real work, rounded to 40 ms by the fixed 50 Hz
+      - Measured tick decomposition (~15 250 ticks): gRPC `Step` 16.0 ms + DDS 900 KiB round trip
+        11.6 ms + C++ node 0.06 ms = ~28 ms real work, rounded to 40 ms by the fixed 50 Hz
         bridge timer. **Not DDS-bound; the timer quantization is the biggest lever** (event-driven
-        step → ~33 Hz). PredictChunk RTT 81.6 ms stays off the critical path (async worker).
-      - **Async confirmed working as designed:** idle = 0 on every real tick — the 82 ms server
-        latency is fully hidden behind queue execution (Algorithm 1 intent).
-      - 50-episode closed-loop re-run (seeds 0–49, `g=0.5`, ramp-in 5, per-episode GIF) with
-        `act_aloha_sim_transfer_cube_human` (the fine-tuned SmolVLA checkpoint is gitignored and
-        did not survive the host move); artifacts: `benchmarks/results/ros2/stage1_50ep.json`,
-        `.../gifs_50/`, `.../timing_breakdown.json`.
+        step → ~35 Hz). PredictChunk RTT 229 ms (SmolVLA fs3) stays off the critical path.
+      - **Async confirmed working as designed:** idle = 0 on every real tick — the 229 ms fs3
+        server latency is fully hidden behind queue execution (Algorithm 1 intent).
+      - 50-episode closed-loop re-run (seeds 0–49, `g=0.5`, ramp-in 5, per-episode GIF) with the
+        **fine-tuned SmolVLA deliverable** (fs3, fp32): **40/50 = 80 %, idle 0.04, 12.5 sends/ep**
+        — inside the original gate's binomial band (ROS2 74 %, oracle 78 %), now at native 25 Hz.
+        Artifacts: `benchmarks/results/ros2/stage1_50ep.json`, `.../gifs_50/`,
+        `.../timing_breakdown.json`.
       - Follow-up unchanged: 900 KiB raw frame → JPEG on the wire trims the 12 ms DDS leg; and an
         event-driven bridge step removes the 10 ms timer-quantization tax.
 
