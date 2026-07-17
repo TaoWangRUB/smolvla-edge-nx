@@ -115,18 +115,33 @@
 
 ## 5. Stage 2b — C++ inference server (cpp-inference-server)
 
-- [ ] 5.1 Scaffold `deploy/cpp_server/` (CMake, gRPC C++ service impl of Policy, ONNX Runtime
-      GPU C++ API, CUDA EP); containerize (extend `smolvla-edge:ros2` or a slim runtime image)
-- [ ] 5.2 Implement PredictChunk (raw image/state ingest → graph inputs → chunk reply with
-      timestamps), Reset, Health (device/precision/model path/provider)
-- [ ] 5.3 Compose profiles `py` / `cpp` backing the same server address; verify only one server
-      in the GPU process list at a time
-- [ ] 5.4 Wire-compat check: Python reference client and the ROS2 client both run unmodified
-      against the C++ server
-- [ ] 5.5 **Stage 2 gate:** closed-loop batch (same seeds, ≥ 50 episodes) vs Python-server
-      baseline within binomial noise
-- [ ] 5.6 TensorRT EP flag + persistent engine cache volume; Health reports active provider;
-      measure first-build vs cached startup
+- [x] 5.1 Scaffolded `deploy/cpp_server/` (CMake + `src/server.cpp`, gRPC C++ Policy impl over
+      the ONNX Runtime C++ CUDA EP). Containerized as `docker/cpp_server.Dockerfile` FROM
+      `smolvla-edge:sim` (already carries CUDA 12.4 + cuDNN 9 + cuBLAS via the pytorch base's pip
+      nvidia wheels — cheaper than adding CUDA to the Jazzy image), adding gRPC/protobuf/OpenCV
+      C++ + the ORT GPU C++ release, with `LD_LIBRARY_PATH` -> the nvidia wheel lib dirs (the
+      rover's pattern; setting it inside the process is too late for the loader). CUDA EP loads;
+      fp32 graph peaks at **2.3 GB VRAM → fits the 4 GB GPU** (fp16 not needed).
+- [x] 5.2 PredictChunk (serving-side `resize_with_pad` in OpenCV: 480x640 raw uint8 -> 384x512
+      bilinear -> pad 128 top -> 512x512 [0,1] CHW; state passthrough; noise sampled here) +
+      Reset (stateless graph) + Health (device/precision/model/provider). Dims read from the
+      graph at load, so one binary serves any exported variant.
+- [x] 5.3 Compose `cpp-server` service (profile `cpp`, nvidia runtime, same `:50051` as the
+      Python server) + `CPP_PROVIDER`/`ONNX_MODEL` env; A/B is which server you start.
+- [x] 5.4 **Wire-compat PASS:** the Python reference client and the **ROS2 `async_client` run
+      unmodified** against the C++ server (valid [50,14] chunks, Health cuda/fp32).
+- [~] 5.5 **Stage 2 gate: FAILS on this GPU, for a characterized latency reason (not a
+      correctness bug).** ROS2 stack -> C++ server, 50 ep: **11/50 = 22 %, idle 64.7/ep** vs the
+      80 % Python-server baseline. Root cause: ORT CUDA EP inference of the 500 M-param SmolVLM2
+      VLM is **~1.0 s/chunk** on the RTX A2000 Laptop (GPU pinned ~1 GHz/20 W at 100 % util under
+      sustained load) vs PyTorch's **229 ms** — the cost is the VLM *prefix* forward, not the
+      Euler steps (fs3 export did not help), so at g=0.5 the ~1 s async buffer starves -> idle ->
+      failure. The graph itself is correct (parity 4e-6) and wire-compatible; the gate would pass
+      on a workstation-class GPU (design's Titan X tier). Artifact:
+      `benchmarks/results/ros2/stage2_cpp_50ep.json`. Remedy under evaluation: **5.6 TensorRT EP**.
+- [ ] 5.6 TensorRT EP flag (wired in `server.cpp` + `CPP_PROVIDER=tensorrt`, engine cache under
+      `models/onnx/trt_cache`); needs a fp32 build that fits 4 GB alongside the graph — the
+      designed remedy for the 5.5 latency wall. Health reports the active provider.
 
 ## 6. Pipeline automation (deployment-pipeline)
 

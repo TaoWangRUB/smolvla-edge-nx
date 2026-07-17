@@ -112,6 +112,35 @@ services:
         --policy-path ${POLICY_PATH:-outputs/train/smolvla_transfer_cube/checkpoints/020000}
         --precision fp32 --port 50051 ${POLICY_SERVER_ARGS:-}
 
+  # Stage 2b — C++ ONNX Runtime policy server (design D6), same Policy proto / port as the
+  # Python server so clients run unmodified. A/B by which one you start (both bind :50051):
+  #   Python:  docker compose up -d policy-server
+  #   C++:     docker compose --profile cpp up -d cpp-server   (or: docker compose up -d cpp-server)
+  # One-time build of the binary (cmake, inside the image):
+  #   docker compose run --rm cpp-server bash -lc 'cd deploy/cpp_server && cmake -B build -DCMAKE_BUILD_TYPE=Release && cmake --build build -j'
+  # Provider swap: CPP_PROVIDER=tensorrt for the TRT EP (engine cache under models/onnx/trt_cache).
+  cpp-server:
+    image: smolvla-edge:cpp-server
+    build:
+      context: .
+      dockerfile: docker/cpp_server.Dockerfile
+    profiles: ["cpp"]
+    runtime: nvidia
+    working_dir: /workspace
+    stop_signal: SIGINT
+    environment:
+      NVIDIA_VISIBLE_DEVICES: all
+      NVIDIA_DRIVER_CAPABILITIES: all
+    volumes:
+      - ./:/workspace
+    command:
+      - bash
+      - -lc
+      - >
+        deploy/cpp_server/build/policy_server
+        --model ${ONNX_MODEL:-/workspace/models/onnx/smolvla_transfer_cube.onnx}
+        --provider ${CPP_PROVIDER:-cuda} --port 50051
+
   # gym-aloha behind the SimEnv gRPC service (deploy/client_server/sim_server.py); keeps the
   # mujoco-2.3.7/py3.11 sim inside its matched container.
   sim-server:

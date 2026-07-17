@@ -52,6 +52,7 @@ def main() -> int:
     ap.add_argument("--observations", type=int, default=100)
     ap.add_argument("--seed", type=int, default=900, help="rollout seed (disjoint from eval 0-49)")
     ap.add_argument("--env-id", default="gym_aloha/AlohaTransferCube-v0")
+    ap.add_argument("--flow-steps", type=int, default=None, help="match the exported graph's steps")
     ap.add_argument("--report", default="benchmarks/results/onnx_parity.json")
     args = ap.parse_args()
 
@@ -65,6 +66,8 @@ def main() -> int:
     policy, _ = load_policy(args.checkpoint, "cpu")
     policy.eval().float()
     cfg = policy.config
+    if args.flow_steps is not None:
+        cfg.num_steps = args.flow_steps  # match the exported graph
     action_dim = cfg.action_feature.shape[0]
 
     # server-exact reference path; a spy pins the noise and grabs the consumed image

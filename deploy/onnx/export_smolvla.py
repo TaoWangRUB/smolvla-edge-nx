@@ -134,6 +134,10 @@ def main() -> None:
     ap.add_argument("--out", default="models/onnx/smolvla.onnx")
     ap.add_argument("--device", default="cpu", help="export device (cpu is enough; fp32)")
     ap.add_argument("--opset", type=int, default=17)
+    ap.add_argument("--flow-steps", type=int, default=None,
+                    help="override flow-matching Euler steps to UNROLL (match deployment; the "
+                         "Stage-1 server runs fs3 — a 10-step graph is ~3x slower and drains the "
+                         "async queue under GPU contention)")
     args = ap.parse_args()
 
     from lerobot.policies.factory import make_pre_post_processors
@@ -141,6 +145,8 @@ def main() -> None:
 
     policy, dev = load_policy(args.checkpoint, args.device)
     policy.eval().float()  # force fp32 (SmolVLM2 backbone ships bf16; ORT rejects bf16 Conv)
+    if args.flow_steps is not None:
+        policy.config.num_steps = args.flow_steps  # unroll this many Euler steps (match server)
     pp = resolve_policy_path(args.checkpoint)
     pre, post = make_pre_post_processors(policy_cfg=policy.config, pretrained_path=pp)
     norm = next(s for s in pre.steps if type(s).__name__ == "NormalizerProcessorStep")
