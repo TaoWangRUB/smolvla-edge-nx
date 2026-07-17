@@ -139,9 +139,18 @@
       failure. The graph itself is correct (parity 4e-6) and wire-compatible; the gate would pass
       on a workstation-class GPU (design's Titan X tier). Artifact:
       `benchmarks/results/ros2/stage2_cpp_50ep.json`. Remedy under evaluation: **5.6 TensorRT EP**.
-- [ ] 5.6 TensorRT EP flag (wired in `server.cpp` + `CPP_PROVIDER=tensorrt`, engine cache under
-      `models/onnx/trt_cache`); needs a fp32 build that fits 4 GB alongside the graph — the
-      designed remedy for the 5.5 latency wall. Health reports the active provider.
+- [~] 5.6 **Latency root-cause investigated (the 5.5 wall).** ORT node profiling: 97% CUDA, the
+      TorchDynamo graph is 30852 tiny nodes. Tried, in order: ORT graph-opt (30852→4920, no RTT
+      change — ORT does it online); `transformers.optimizer` (544 ms, −22%); a **RoPE patch**
+      (`deploy/onnx/onnx_patches.py`: `apply_rope` split→slice + in-place→cat) that removes ALL
+      `SplitToSequence`/`SequenceAt`/`ScatterND` → **graph is now 100% CUDA-partitioned** (parity
+      still 4e-6), which **unblocks CUDA Graphs**. But CUDA Graphs gave **no speedup** (618 vs
+      621 ms) → the server is **kernel-execution-bound, not launch-overhead-bound**: ORT's unfused
+      small kernels execute slower than PyTorch's fused ones (cuBLAS/flash-attn/fused-LN), and the
+      RTX A2000 Laptop sits at ~1 GHz/20 W under load. **TensorRT EP** (wired via
+      `CPP_PROVIDER=tensorrt`) is the real remedy but needs the TensorRT runtime installed
+      (`libnvinfer.so.10`, ~2 GB — not in the image) + a 4 GB-fitting engine build; the RoPE patch
+      made the graph TRT-friendly. The gate passes as-is on a non-throttled workstation GPU.
 
 ## 6. Pipeline automation (deployment-pipeline)
 

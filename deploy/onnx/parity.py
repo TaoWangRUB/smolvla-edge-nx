@@ -63,6 +63,9 @@ def main() -> int:
     from smolvla_edge.async_infer import make_chunk_predictor
     from smolvla_edge.common import load_policy
 
+    from onnx_patches import patch_rope_no_sequence_ops
+    patch_rope_no_sequence_ops()  # match the exported graph's RoPE (slice+cat, not split)
+
     policy, _ = load_policy(args.checkpoint, "cpu")
     policy.eval().float()
     cfg = policy.config
