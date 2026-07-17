@@ -54,3 +54,6 @@ benchmarks/results/ros2/gif_smoke/
 !**/.gitkeep
 data/*.tar.gz
 *.tar.gz
+
+# Vendored Jetson wheels (large binaries; fetch from Jetson Zoo)
+*.whl

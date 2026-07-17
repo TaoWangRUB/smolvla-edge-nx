@@ -11,7 +11,8 @@ part most tutorials skip.
 
 No robot arm required: SmolVLA fine-tunes from public Hugging Face datasets, and evaluation
 runs **closed-loop in the gym-aloha MuJoCo simulator** (plus open-loop replay as a fallback).
-The Xavier NX edge phase is fully specced and kicks in whenever a Jetson is on hand.
+The Xavier NX edge phase is live — the fine-tuned SmolVLA already runs on-device on a Jetson
+Xavier NX (8 GB) via pure-Python ONNX Runtime GPU (~610 ms/chunk); see the deployment section.
 
 ---
 
@@ -94,8 +95,10 @@ edge deployment and latency engineering.
   loop runs entirely in the LeRobot-native gym-aloha MuJoCo env: fine-tune on
   `lerobot/aloha_sim_insertion_human`, evaluate **closed-loop** with the env's own success flag.
   The real SO-101 path (`configs/train.so101_pickplace.yaml`) is kept for when hardware exists.
-- **Optional — Jetson Xavier NX edge deployment.** Kept fully specced (Phase 2) but parked until
-  a Jetson is on hand.
+- **Jetson Xavier NX edge deployment (Phase 2, now live).** A Jetson Xavier NX (8 GB) is on hand:
+  the fine-tuned SmolVLA runs on-device via pure-Python ONNX Runtime GPU (~610 ms/chunk, fp32) —
+  see [On-device on the Xavier NX](#on-device-on-the-xavier-nx--first-measured-number). FP16, the
+  on-device async stack, and INT8/TensorRT remain.
 - **Future work — mobile rover.** A rover is a different embodiment (mobile base, not an arm).
   Adapting SmolVLA to it is a research project, not a two-week demo. See the *Non-Goals* in
   [the change design](openspec/changes/smolvla-edge-deployment/design.md).
@@ -104,7 +107,7 @@ edge deployment and latency engineering.
 
 ## Roadmap
 
-Progress: **18 / 27 tasks** — details in
+Progress: **19 / 27 tasks** — details in
 [the change tasks](openspec/changes/smolvla-edge-deployment/tasks.md).
 
 **Headline result — the head-to-head is in: the fine-tuned SmolVLA wins.** On
@@ -119,8 +122,8 @@ gap (36 Hz ceiling vs the 50 Hz control loop) is exactly what the edge phase exi
 |-------|------|--------|-------|
 | 0 | **Scaffold + environment** — repo, pins, host env, **Docker env** | ✅ 6/6 | matched-mujoco container built & verified |
 | 1 | **Correctness (sim)** — verify-first, fine-tune SmolVLA, closed-loop eval | ✅ 6/6 | **Deliverable: fine-tuned SmolVLA 70 % success** (transfer cube, 20 eps, matched mujoco) vs official ACT baseline **65 %** on identical seeds; trained 20k steps on Colab A100 |
-| 2 | **Edge deployment** (optional) — Xavier NX on-device + client/server | ⏸ 0/7 | parked until a Jetson NX is on hand; chunking, low-Hz VLM, INT8-where-it-converts |
-| 3 | **Benchmarks + writeup** — latency table + demo GIF + narrative | 🔄 3/5 | ✅ demo GIFs (fine-tuned SmolVLA + ACT baseline, latency overlays), collate, narrative through Phase 1; NX benchmark tiers pending hardware |
+| 2 | **Edge deployment** — Xavier NX on-device + client/server | 🔄 1/7 | **Jetson Xavier NX (8 GB) now on hand** — the fine-tuned SmolVLA runs on-device via **pure-Python ONNX Runtime GPU**: ~610 ms/chunk (CUDA EP, fp32, 20 W/6-core). FP16, on-device async, and INT8/TensorRT still pending |
+| 3 | **Benchmarks + writeup** — latency table + demo GIF + narrative | 🔄 3/5 | ✅ demo GIFs (fine-tuned SmolVLA + ACT baseline, latency overlays), collate, narrative through Phase 1; NX benchmark tiers now unblocked (first on-device number below) |
 
 **Measured so far** (evaluated on RTX 2000 Ada, matched-mujoco container; SmolVLA trained on a Colab A100):
 
@@ -264,6 +267,37 @@ clear "what converted / what didn't" table.
 This mirrors how real customer robots offload inference and gives the second benchmark point.
 
 See [deploy/README.md](deploy/README.md).
+
+### On-device on the Xavier NX — first measured number
+
+The fine-tuned SmolVLA now runs **on a real Jetson Xavier NX (8 GB) Developer Kit**, entirely
+on-device, via the **pure-Python ONNX Runtime GPU** path — no C++ server, no torch, no lerobot.
+The Stage-2a monolithic export bakes the instruction tokens and all normalization into the graph
+(`models/onnx/*.meta.json`), so inference needs only `numpy` + `onnxruntime-gpu`:
+
+| Device | Provider | Precision | Chunk inference (mean) | Budget |
+|---|---|---|---|---|
+| Xavier NX (JetPack 5.1, CUDA 11.4, **20 W/6-core**) | ORT CUDA EP | fp32 | **~610 ms** | 50 actions = 1 s of motion → keeps up on average |
+| RTX 2000 Ada (dev box, reference) | PyTorch | fp32 | ~300 ms | — |
+
+~2× the dev-box latency, as expected for the edge — and still under the 1 s a 50-action chunk
+buys at 50 Hz, so with async decoupling ([§ async inference](#asynchronous-inference--the-papers-algorithm-1-reproduced-in-sim)) the GPU keeps up on average.
+
+```bash
+# on the Jetson (repo at ~/workspace/smolvla-edge-nx). One-time build (buildx-free):
+DOCKER_BUILDKIT=0 docker build -f docker/jetson_infer.Dockerfile -t smolvla-edge:jetson .
+# latency benchmark (CUDA EP; ORT_PROVIDER=tensorrt to try the TRT EP):
+docker compose -f docker-compose.jetson.yml run --rm bench
+```
+
+**What it took (all in the Jetson files):** the only cp38/CUDA-11.4 wheel for JetPack 5 is
+`onnxruntime-gpu 1.15.1` (vendored under `deploy/onnx/wheels/`), which is older than the x86
+export target — so [`deploy/onnx/patch_for_ort115.py`](deploy/onnx/patch_for_ort115.py) downgrades
+the graph IR 10→9 and casts 24 int64 `ArgMin`/`ArgMax` inputs to int32 (ORT 1.15 has no int64
+kernel). The lean `l4t-base:r35.2.1` image carries no CUDA toolkit, so
+[docker-compose.jetson.yml](docker-compose.jetson.yml) bind-mounts the host `/usr/local/cuda`
++ cuDNN/TensorRT and sets `LD_LIBRARY_PATH` — the same pattern the rover Jetson stack uses.
+Full deployment notes: [deploy/README.md](deploy/README.md).
 
 ---
 

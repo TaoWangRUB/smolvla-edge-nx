@@ -1,0 +1,11 @@
+# Keep the Docker build context small. The Jetson image (docker/jetson_infer.Dockerfile) only
+# COPYs the vendored ORT wheel under deploy/onnx/wheels/; the 1.8 GB ONNX model and source are
+# bind-mounted at runtime (see docker-compose*.yml), never baked in.
+.git/
+models/
+outputs/
+notebooks/
+benchmarks/results/
+*.pdf
+**/__pycache__/
+deploy/cpp_server/build/
