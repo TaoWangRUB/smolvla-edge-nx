@@ -143,6 +143,9 @@ def main() -> None:
     from lerobot.policies.factory import make_pre_post_processors
     from smolvla_edge.common import load_policy, resolve_policy_path
 
+    from onnx_patches import patch_rope_no_sequence_ops
+    patch_rope_no_sequence_ops()  # all-CUDA graph (no SplitToSequence/ScatterND) -> CUDA Graphs
+
     policy, dev = load_policy(args.checkpoint, args.device)
     policy.eval().float()  # force fp32 (SmolVLM2 backbone ships bf16; ORT rejects bf16 Conv)
     if args.flow_steps is not None:
