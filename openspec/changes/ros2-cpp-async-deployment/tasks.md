@@ -157,6 +157,15 @@
       as-is) or a **TRT-clean re-export** (open-ended op surgery). CUDA Graphs is a dead end (the
       graph is kernel-execution-bound, not launch-overhead-bound).
 
+- [x] 5.7 **Same graph, real edge target, pure-Python ORT-GPU** (cross-ref: smolvla-edge-deployment
+      §6). The Stage-2a monolithic ONNX now runs on a **Jetson Xavier NX (8 GB)** under the ORT
+      CUDA EP without the C++ server: **~610 ms mean/chunk** (fp32, JetPack 5.1 / CUDA 11.4,
+      20 W/6-core; `docker/jetson_infer.Dockerfile` + `docker-compose.jetson.yml` +
+      `deploy/onnx/bench_ort.py`). Confirms the §5.5/5.6 read that the wall is GPU-fusion/throughput,
+      not a correctness bug — the identical graph is portable to the edge; latency just scales with
+      the device. JP5's newest cp38/CUDA-11.4 wheel is `onnxruntime-gpu 1.15.1`, so the graph needs
+      `deploy/onnx/patch_for_ort115.py` (IR 10→9 + int64→int32 ArgMin casts) to load.
+
 ## 6. Pipeline automation (deployment-pipeline)
 
 - [ ] 6.1 `scripts/deploy_pipeline.sh <checkpoint>`: chain export → parity → cpp-server image

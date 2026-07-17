@@ -53,15 +53,37 @@ chunk, then block on inference) is the `g = 0` sequential limit of the same loop
 - [x] 5.2 Update `README.md` links from `docs/…` to the OpenSpec change/specs
 - [x] 5.3 Relocate demo media output from `docs/assets/` to `benchmarks/results/`
 
-## 6. Edge hardware verification — Xavier NX (LAST, OPTIONAL — only if a Jetson NX is on hand)
+## 6. Edge hardware verification — Xavier NX (a Jetson NX is now on hand)
 
-Deferred to the end: everything above runs with no hardware. The async stack from §3 is
-the on-device execution model — when an NX shows up, §3's client runs on it unchanged.
+Everything above runs with no hardware. A **Jetson Xavier NX (8 GB) Developer Kit** is now
+connected (`xaiver-eth`=10.42.0.2 / `xaiver-wlan`, user `nvidia`, repo at
+`~/workspace/smolvla-edge-nx`). First on-device milestone chose the **pure-Python ONNX Runtime
+GPU** path (serve the Stage-2a monolithic ONNX graph) over the torch-checkpoint + §3 async
+stack: the graph bakes in the instruction + normalization, so on-device inference needs only
+`numpy` + `onnxruntime-gpu` — no torch/lerobot/tokenizer, which fits the 8 GB budget cleanly.
 
-- [ ] 6.1 Stand up the NX environment per the design's JetPack setup (record JetPack version + power mode)
-- [ ] 6.2 Get the checkpoint running on the NX (FP16, within the 8 GB budget)
+- [x] 6.1 **NX environment stood up.** Xavier NX 8 GB Dev Kit, **JetPack 5.1 / L4T R35.4.1**,
+      CUDA 11.4, TensorRT 8.5.2, cuDNN 8, Python 3.8, 6.7 GiB unified RAM + 3.3 GiB swap, power
+      mode **MODE_20W_6CORE**. Container `smolvla-edge:jetson` (`docker/jetson_infer.Dockerfile`,
+      `docker-compose.jetson.yml`): lean `nvcr.io/nvidia/l4t-base:r35.2.1` base (l4t-jetpack:r35.4.1
+      is 5.3 GB — too big for ~14 GB free disk) + vendored `onnxruntime-gpu 1.15.1` cp38 wheel
+      (`deploy/onnx/wheels/`; the only CUDA-11.4/cp38 build for JP5, jetson-ai-lab index has flaky
+      DNS). NOT reused the rover image (Ubuntu 24.04 / py3.12 → no cp38 ORT wheel). Build with
+      `DOCKER_BUILDKIT=0 docker build …` (Jetson's compose lacks buildx ≥0.17).
+- [~] 6.2 **Checkpoint running on the NX — fp32 via ORT-GPU (partial; FP16 pending).** The
+      exported graph runs on the NX GPU under the ORT CUDA EP: **~610 ms mean/chunk** (p50 610,
+      p90 620, 20-iter), vs ~300 ms PyTorch on the RTX 2000 Ada dev box — ~2× as expected at the
+      edge, still under the 1 s a 50-action chunk buys at 50 Hz. Fits 6.7 GiB unified RAM (fp32
+      graph ~1.8 GB). Bench: `docker compose -f docker-compose.jetson.yml run --rm bench`
+      (`deploy/onnx/bench_ort.py`). Two shims to load under ORT 1.15.1
+      (`deploy/onnx/patch_for_ort115.py`, run in the dev sim container — 1.8 GB load/save OOMs the
+      NX): IR 10→9 downgrade + 24 int64→int32 Casts before ArgMin/ArgMax (ORT 1.15 lacks int64
+      ArgMin kernels). CUDA/cuDNN/TRT bind-mounted from the host (`l4t-base` ships no toolkit) via
+      the rover's `/usr/local/cuda` + `LD_LIBRARY_PATH` pattern. **FP16 variant** (task 4.4 /
+      ros2-cpp 4.4) still to do.
 - [ ] 6.3 On-device: run the §3 async stack (action queue + decoupled execution) on the NX
 - [ ] 6.4 On-device: run the VLM stage at low Hz relative to the control loop
 - [ ] 6.5 On-device: INT8 only via a real quantized/TensorRT engine on subgraphs that convert
+      (ORT TRT EP wired via `ORT_PROVIDER=tensorrt`; expect the ros2-cpp §5.6 TRT-parser wall)
 - [ ] 6.6 Log conversions honestly in `deploy/ondevice/conversion_notes.md` (what converted / what didn't / per-stage budget)
 - [ ] 6.7 Client/server split-latency tier measured from the NX as the client (the remote variant of task 3.8, re-run on real edge hardware)

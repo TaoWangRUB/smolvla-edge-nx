@@ -1,0 +1,77 @@
+# smolvla-edge — Jetson Xavier NX on-device inference (Phase 2, Mode A).
+#
+# A SEPARATE compose file from the x86 docker-compose.yml on purpose: different base image
+# (L4T aarch64 vs pytorch/cuda12 x86), different runtime footprint. Keeping it standalone
+# means neither file's `build:` ever fires on the wrong architecture.
+#
+#   docker compose -f docker-compose.jetson.yml build              # build smolvla-edge:jetson (once)
+#   docker compose -f docker-compose.jetson.yml run --rm bench     # latency benchmark (CUDA EP)
+#   ORT_PROVIDER=tensorrt docker compose -f docker-compose.jetson.yml run --rm bench   # try TRT EP
+#   docker compose -f docker-compose.jetson.yml run --rm shell     # interactive shell
+#   docker compose -f docker-compose.jetson.yml run --rm parity    # re-check ORT parity on device
+#
+# `version: "2.4"` is required by compose v1 for `runtime: nvidia`; ignored by v2.
+version: "2.4"
+
+x-jetson: &jetson
+  image: smolvla-edge:jetson
+  build:
+    context: .
+    dockerfile: docker/jetson_infer.Dockerfile
+  runtime: nvidia              # mounts the L4T driver libs (libcuda etc.) via l4t.csv
+  working_dir: /workspace
+  stop_signal: SIGINT
+  environment:
+    NVIDIA_VISIBLE_DEVICES: all
+    NVIDIA_DRIVER_CAPABILITIES: all
+    ONNX_MODEL: ${ONNX_MODEL:-/workspace/models/onnx/smolvla_transfer_cube.onnx}
+    # This L4T host's nvidia runtime ships only l4t.csv (driver libs) — NOT the CUDA toolkit,
+    # cuBLAS or cuDNN. So onnxruntime's CUDA/TRT EPs would fail to dlopen libcublasLt.so.11 /
+    # libcudnn.so.8. We bind-mount them from the host (below) and point the loader here —
+    # this mirrors the proven ackermann_rover Jetson setup (mount host /usr/local/cuda + set
+    # CUDA_HOME/LD_LIBRARY_PATH). /opt/nvlibs (host /usr/lib/aarch64-linux-gnu) additionally
+    # supplies cuDNN 8 + TensorRT 8.5 (which ORT needs but the rover didn't); it goes LAST so
+    # it can't shadow the container's own libc/libstdc++ (both sides are Ubuntu 20.04 aarch64).
+    CUDA_HOME: /usr/local/cuda
+    PATH: /usr/local/cuda/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+    LD_LIBRARY_PATH: /usr/local/cuda/lib64:/usr/local/cuda/targets/aarch64-linux/lib:/opt/nvlibs
+  volumes:
+    - ./:/workspace          # source + the 1.8 GB models/onnx/*.onnx are mounted, not baked
+    - /usr/local/cuda:/usr/local/cuda:ro              # host symlink -> cuda-11.4 (rover convention)
+    - /usr/lib/aarch64-linux-gnu:/opt/nvlibs:ro       # cuDNN 8 + TensorRT 8.5 runtime libs
+
+services:
+  shell:
+    <<: *jetson
+    stdin_open: true
+    tty: true
+    command: bash
+
+  # On-device latency benchmark: runs the exported graph under onnxruntime-gpu and reports
+  # per-inference ms. The graph is task-baked (instruction + normalization compiled in), so
+  # this feeds correctly-shaped random image/state/noise and needs only numpy + ORT.
+  bench:
+    <<: *jetson
+    command:
+      - bash
+      - -lc
+      - >
+        python3 deploy/onnx/bench_ort.py
+        --model $$ONNX_MODEL
+        --provider ${ORT_PROVIDER:-cuda}
+        --iters ${ITERS:-50}
+
+  # Re-run the FP32 numerical parity gate on the Jetson itself (sanity that the aarch64 ORT
+  # build produces the same actions as the x86 export). NOTE: parity.py imports torch +
+  # gym-aloha + lerobot, which are NOT in this lean image — enable this only if you add them
+  # (heavy on 8 GB / 14 GB disk). Kept here as the documented, opt-in verification path.
+  parity:
+    <<: *jetson
+    command:
+      - bash
+      - -lc
+      - >
+        python3 deploy/onnx/parity.py
+        --onnx $$ONNX_MODEL
+        --task "Pick up the cube with the right arm and transfer it to the left arm."
+        --observations ${OBS:-20} --flow-steps 3
