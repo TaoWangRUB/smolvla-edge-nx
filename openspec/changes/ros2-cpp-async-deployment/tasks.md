@@ -148,9 +148,14 @@
       621 ms) → the server is **kernel-execution-bound, not launch-overhead-bound**: ORT's unfused
       small kernels execute slower than PyTorch's fused ones (cuBLAS/flash-attn/fused-LN), and the
       RTX A2000 Laptop sits at ~1 GHz/20 W under load. **TensorRT EP** (wired via
-      `CPP_PROVIDER=tensorrt`) is the real remedy but needs the TensorRT runtime installed
-      (`libnvinfer.so.10`, ~2 GB — not in the image) + a 4 GB-fitting engine build; the RoPE patch
-      made the graph TRT-friendly. The gate passes as-is on a non-throttled workstation GPU.
+      `CPP_PROVIDER=tensorrt`). **TRT attempted**: baked `tensorrt-cu12==10.16` into the image +
+      LD_LIBRARY_PATH; the EP loads, but TRT's ONNX parser can't compile the dynamo graph — chain
+      of op-compat errors (LayerNormalization >1 output → fixed with `_strip_layernorm_extra_outputs`
+      in the export, 25 nodes; then ReduceMean; then dynamic-axis "Axis must be an initializer"; …),
+      so ORT fragments it into CUDA-fallback islands with no fusion benefit. Conclusion: closing the
+      fusion gap needs either a **workstation GPU** (recommended — ORT-CUDA ~200-250 ms, gate passes
+      as-is) or a **TRT-clean re-export** (open-ended op surgery). CUDA Graphs is a dead end (the
+      graph is kernel-execution-bound, not launch-overhead-bound).
 
 ## 6. Pipeline automation (deployment-pipeline)
 

@@ -92,6 +92,18 @@ def _stats(norm_step, key):
     return ts["mean"].float().clone(), ts["std"].float().clone()
 
 
+def _strip_layernorm_extra_outputs(model_proto) -> int:
+    """TensorRT rejects LayerNormalization nodes with >1 output; the TorchDynamo export emits
+    all 25 with (Y, Mean, InvStdDev) but the Mean/InvStdDev are unused. Drop them to 1 output so
+    the TRT EP can compile the graph (CUDA/CPU EPs are unaffected)."""
+    n = 0
+    for node in model_proto.graph.node:
+        if node.op_type == "LayerNormalization" and len(node.output) > 1:
+            del node.output[1:]
+            n += 1
+    return n
+
+
 def _double_to_float(model_proto):
     """Down-cast every float64 tensor in the graph to float32 (ORT has no fp64 Cos/Sin CPU
     kernels; the model is fp32, so these are spurious RoPE-precision intermediates)."""
@@ -190,6 +202,8 @@ def main() -> None:
     mp = onnx.load(str(tmp))
     fixed = _double_to_float(mp)
     print(f"[export] down-cast {fixed} float64 tensors -> float32")
+    stripped = _strip_layernorm_extra_outputs(mp)
+    print(f"[export] stripped extra outputs from {stripped} LayerNormalization nodes (TRT compat)")
     onnx.checker.check_model(mp) if mp.ByteSize() < 2 * 1024**3 else None
     big = mp.ByteSize() >= 2 * 1024**3
     onnx.save(mp, str(out_path), save_as_external_data=big,
