@@ -91,16 +91,27 @@
 
 ## 4. Stage 2a — ONNX export + parity (policy-onnx-export)
 
-- [ ] 4.1 Export script `deploy/onnx/export_smolvla.py` (runs in sim container): monolithic
+- [x] 4.1 Export script `deploy/onnx/export_smolvla.py` (runs in sim container): monolithic
       graph, 10 Euler steps unrolled, fixed task tokens baked in, normalization inside the
-      graph, noise as explicit input; task string recorded in graph metadata
-- [ ] 4.2 Load-check under ONNX Runtime (Python) with expected I/O shapes; external-weights
-      layout if > 2 GB
-- [ ] 4.3 Parity harness `deploy/onnx/parity.py`: ≥ 100 held-out observations, fixed noise
-      seed; ENFORCED gate max-abs-diff ≤ 1e-4 AND cosine ≥ 0.9999 (non-zero exit on fail);
-      report artifact with hashes into `benchmarks/results/`
+      graph (image [0,1]→[-1,1], state MEAN_STD+pad, action MEAN_STD unpad), noise as explicit
+      input; task + token ids + shapes + hash recorded in `<out>.meta.json`.
+      Key findings: the **legacy TorchScript exporter fails** (`ScalarType ComplexDouble` from the
+      SmolVLM2 rotary embedding) — the **TorchDynamo exporter** (`dynamo=True`, needs `onnxscript`)
+      traces the whole VLM cleanly. Must force the model to **fp32** (SmolVLM2 ships bf16 → ORT
+      rejects bf16 Conv) and **down-cast 330 float64 tensors → float32** post-export (ORT has no
+      fp64 Cos/Sin CPU kernels — spurious RoPE-precision intermediates). Output 1871 MB single file.
+- [x] 4.2 Load-check under ONNX Runtime (`InferenceSession`, CPU EP) with expected I/O shapes
+      (`image[1,3,512,512]`, `state[1,14]`, `noise[1,50,32]` → `action_chunk[1,50,14]`); < 2 GB so
+      single-file (external-weights branch wired for > 2 GB).
+- [x] 4.3 Parity harness `deploy/onnx/parity.py`: 100 held-out observations (rollout seed 900,
+      disjoint from eval 0-49), fixed noise seed, reference via the exact `make_chunk_predictor`
+      server path (spy pins noise + captures the consumed image). **ENFORCED gate is the process
+      exit code** (max-abs-diff ≤ 1e-4 AND cosine ≥ 0.9999, non-zero on fail). **PASS: worst
+      max-abs-diff 4.29e-6, worst cosine 0.99999988** over 100 obs →
+      `benchmarks/results/onnx_parity.json` (with checkpoint + onnx sha).
 - [ ] 4.4 (Optional after FP32 parity) FP16 variant; gate on closed-loop success, not tensor
-      diffs
+      diffs — **deferred**: closed-loop gating needs the serving path (Stage 2b) to run the graph
+      in the loop; revisit once cpp-server (or a Python ORT-backed server) lands.
 
 ## 5. Stage 2b — C++ inference server (cpp-inference-server)
 

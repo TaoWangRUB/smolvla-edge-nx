@@ -46,6 +46,11 @@ RUN pip install --no-cache-dir \
     "grpcio==1.66.2" "grpcio-tools==1.66.2" "protobuf>=5.27,<6" \
     "huggingface_hub" numpy pandas matplotlib "imageio[ffmpeg]"
 
+# ONNX export + parity (Stage 2a, policy-onnx-export). onnx graph surgery for external weights;
+# onnxruntime (CPU) is the FP32 parity reference for the exported graph. GPU EP is the C++
+# server's job (Stage 2b), so the CPU wheel is enough here.
+RUN pip install --no-cache-dir "onnx>=1.16" "onnxruntime>=1.18" "onnxscript>=0.1"
+
 ENV MUJOCO_GL=egl \
     PYTHONPATH=/workspace/src \
     HF_HOME=/root/.cache/huggingface

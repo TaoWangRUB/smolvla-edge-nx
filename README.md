@@ -496,10 +496,23 @@ docker compose run --rm ros2  python3 deploy/client_server/profile_tick.py --ser
 docker compose down   # when finished
 ```
 
-Results: [benchmarks/results/ros2/](benchmarks/results/ros2/). Next stages (see
-[tasks](openspec/changes/ros2-cpp-async-deployment/tasks.md)): ONNX export with an enforced
-parity gate, a C++ ONNX Runtime inference server behind the same proto, and a one-command
-gated deployment pipeline.
+Results: [benchmarks/results/ros2/](benchmarks/results/ros2/).
+
+**Stage 2a — SmolVLA out of PyTorch, into one ONNX graph (done).** `deploy/onnx/export_smolvla.py`
+exports the fine-tuned checkpoint as a **monolithic** graph: vision + the fixed-task language
+prefix (token ids baked in) + the action expert with all **10 flow-matching Euler steps
+unrolled**, with image/state normalization baked in and the denoising noise as an explicit input.
+The serving side feeds only a resized `[0,1]` image, the raw joint state, and noise. The legacy
+TorchScript exporter can't serialize the SmolVLM2 rotary embedding (`ComplexDouble`); the
+**TorchDynamo exporter** traces the whole VLM, after forcing fp32 (the backbone ships bf16) and
+down-casting the RoPE float64 nodes. `deploy/onnx/parity.py` is an **enforced** gate (non-zero
+exit on fail) comparing the graph against the exact server path over 100 held-out observations at
+a fixed noise seed — **PASS at worst max-abs-diff 4.3e-6, worst cosine 0.99999988**
+([onnx_parity.json](benchmarks/results/onnx_parity.json)).
+
+Next (see [tasks](openspec/changes/ros2-cpp-async-deployment/tasks.md)): a C++ ONNX Runtime
+inference server (CUDA/TensorRT EP) behind the same `Policy` proto, then a one-command gated
+deployment pipeline (export → parity → build → closed-loop regression).
 
 ---
 
