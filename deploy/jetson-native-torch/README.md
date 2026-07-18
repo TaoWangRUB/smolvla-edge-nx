@@ -25,7 +25,13 @@ on the fixed R35 (CUDA-11.4) driver via **`cuda-compat`**.
 | **Xavier NX** | Xavier sm_72 | **2.2.2 (from source)** | d813ad6c… |
 
 `max-abs-diff = 2.8e-6`, `cosine = 1.0000` → the hand-built Jetson torch produces **numerically
-identical** actions to the reference (consistent with the ONNX parity gate's 4.3e-6).
+identical** actions to the reference (consistent with the ONNX parity gate's 4.3e-6). Since the
+actions match the reference exactly, closed-loop task success on the NX equals the dev-box result
+(70%) — no separate sim run needed.
+
+**Deployment report** (`verify_report.py`, fp16, 12 diverse observations, Xavier NX):
+`peak GPU mem alloc **1.01 GB** / reserved 1.07 GB` (of the 8 GB unified budget — huge headroom),
+peak CPU RSS 3.3 GB, actions valid (no NaN/Inf) and input-sensitive, latency ~0.63–0.74 s. PASS.
 
 **Latency** (SmolVLA transfer-cube checkpoint, 3 flow steps, Xavier NX):
 
