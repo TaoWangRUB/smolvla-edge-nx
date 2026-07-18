@@ -5,15 +5,45 @@ purchase is gated behind M2 (except camera *selection*, which is an M0 task by d
 
 ## 1. M0 — Foundations (2–3 weeks)
 
-- [ ] 1.1 **Simulator feasibility gate (week 1, blocking)**: verify Isaac Sim + Isaac Lab runs
+- [x] 1.1 **Simulator feasibility gate (week 1, blocking)**: verify Isaac Sim + Isaac Lab runs
       with RTX rendering on an available GPU (current dev GPU is 4 GB — expected FAIL). Decide:
       local GPU upgrade / cloud instance / promote the Gazebo+augmentation fallback. Record the
       decision and the measured FPS/VRAM in this file.
-- [ ] 1.2 Select the real camera model (global shutter, ~100–110° HFOV pinhole, hardware
+      **DECIDED 2026-07-18 — Gazebo fallback promoted.** Isaac Sim cannot run on any available
+      GPU: dev laptop RTX A2000 4 GB is below the ≥8 GB floor; the Titan X 12 GB has no RT
+      cores (hard requirement — even A100/H100 are excluded); NVIDIA cloud rejected (software
+      free, but RTX instances $0.5–1.5/h recurring). Gazebo Harmonic (the existing
+      `ackermann_rover_x86_64_jazzy` image) measured headless on the A2000: **RTF ≈ 1.00 with
+      the 1280×800 camera rendering at a full 15 Hz, 212–311 MiB VRAM** — coexists with
+      training on the same 4 GB card. Per D1, Gazebo is now the *only* maintained simulator.
+      Simplified standalone sim lives in `rover/ros2/src/rover_sim` (this repo); the
+      `ackermann_rover_humble` workspace keeps its PX4/ArduPilot stack untouched (its
+      Dockerfile gained the missing `ros-$ROS_DISTRO-gz-ros2-control`). Known transport note:
+      raw 1280×800 RGB bridges at only ~4.3 Hz over reliable DDS (render side is 15 Hz) —
+      compress or downscale at the recorder (same lever as the ALOHA all-ROS2 result).
+- [x] 1.2 Select the real camera model (global shutter, ~100–110° HFOV pinhole, hardware
       timestamp or external trigger; OV9281-class candidate). Record resolution + intrinsics —
       these become the simulated camera's locked configuration. (Selection only; no purchase.)
-- [ ] 1.3 Model the 1/16 Ackermann rover in USD/URDF: real wheelbase, track width, steering
+      **SELECTED 2026-07-18 — OV9782-based module** (the draft's OV9281 is *monochrome*; color
+      is required for attribute grounding, and OV9782 is its color sibling: 1MP 1/4" global
+      shutter, 1280×800, MIPI CSI-2 and UVC module options, Jetson-supported). Locked sim
+      configuration: **1280×800 @ 15 Hz, HFOV 100° → fx = fy = 537.0, cx = 640, cy = 400**
+      (verified live in the sim `camera_info`). Exact module form (Arducam UVC B0223-class vs
+      Jetvariety MIPI) and the ~100° low-distortion M12 lens are finalized at M3 purchase —
+      stock UVC lens is 70°, so the M12 lens swap is part of the purchase decision.
+- [x] 1.3 Model the 1/16 Ackermann rover in USD/URDF: real wheelbase, track width, steering
       limits, camera mount geometry; verify kinematics (min turn radius) in sim.
+      **DONE 2026-07-18** — `rover/ros2/src/rover_sim/urdf/rover_vla.urdf.xacro`, a stripped
+      copy of the real vehicle's digital twin (`description_robot`): wheelbase 0.174 m, track
+      0.174 m, wheel Ø 77 mm, steering ±0.6 rad, same inertials/friction; PX4/RealSense/T265/
+      lidar branches and the 42 MB mesh dropped. Verified closed-loop via
+      `ackermann_steering_controller`: straight run 0.000 m lateral drift; commanded R = 0.357 m
+      → measured 0.355 m; pose-derived yaw rate +1.400 rad/s = command. **Min feasible turn
+      radius ≈ 0.341 m** (inner wheel hits the 0.6 rad limit first: R = L/tan(0.6) + track/2);
+      commanding beyond it (e.g. ω=2.0 @ 0.5 m/s) breaks the geometry and scrubs wheels — the
+      tracker's hard-limit clamp (task 2.5) is mandatory, not optional. Two recorder notes:
+      derive yaw rate from pose history (the OdometryPublisher `twist` field is unreliable at
+      high curvature), and the camera mount pose is provisional until M3 locks the real mount.
 - [ ] 1.4 Build 2–3 initial scenes (parking lot, corridor, open ground with props) with the
       randomization hooks (lighting, materials, placement, spawn/goal) wired but minimal.
 - [ ] 1.5 ROS 2 bridge up: /observation (camera + state) out, /cmd (steer, throttle) in;

@@ -16,6 +16,15 @@ secure a capable GPU (local or cloud) or promote the documented fallback — Gaz
 image augmentation, accepting a larger transfer gap. The project never maintains both
 simulators in parallel (double cost of rover model, controllers, recording stack).
 
+**Gate outcome (2026-07-18): Gazebo fallback promoted.** No available GPU can run Isaac Sim
+(A2000 4 GB below the VRAM floor; Titan X 12 GB lacks RT cores; cloud RTX rejected on recurring
+cost). Gazebo Harmonic measured on the 4 GB card: RTF ≈ 1.0 with the locked 1280×800 camera
+rendering at 15 Hz, ~250 MiB VRAM. The simulator is the simplified `rover_sim` package in this
+repo (extracted from the `ackermann_rover_humble` digital twin, PX4/ArduPilot coupling
+removed); the "+ aggressive image augmentation" half of the fallback becomes a training-time
+obligation (M1's velocity-scaled blur, plus stronger appearance randomization to compensate the
+plainer renderer).
+
 The rover is a 1/16 Ackermann vehicle in USD/URDF with the real wheelbase, track width,
 steering limits, and camera mount geometry. The simulated camera is locked to the *selected*
 real camera's resolution and intrinsics, and randomization is applied around those nominals.
@@ -197,8 +206,9 @@ subsystem upgrades around a nearly invariant policy contract:
 
 ## Open Questions
 
-- Isaac Sim compute: which GPU (local purchase vs cloud) if the M0 gate rejects the current
-  4 GB card — decided at M0, not before.
+- ~~Isaac Sim compute: which GPU (local purchase vs cloud) if the M0 gate rejects the current
+  4 GB card — decided at M0, not before.~~ **Resolved 2026-07-18**: gate rejected all options;
+  Gazebo fallback promoted (see D1 gate outcome).
 - K and Δt final values (start K=12, Δt=0.25 s → 3 s horizon; tune against tracker behavior
   in M1).
 - Whether the 256M backbone suffices for navigation (would ship 196 ms on the NX) — decide on
