@@ -79,11 +79,24 @@ stack: the graph bakes in the instruction + normalization, so on-device inferenc
       (`deploy/onnx/patch_for_ort115.py`, run in the dev sim container — 1.8 GB load/save OOMs the
       NX): IR 10→9 downgrade + 24 int64→int32 Casts before ArgMin/ArgMax (ORT 1.15 lacks int64
       ArgMin kernels). CUDA/cuDNN/TRT bind-mounted from the host (`l4t-base` ships no toolkit) via
-      the rover's `/usr/local/cuda` + `LD_LIBRARY_PATH` pattern. **FP16 variant** (task 4.4 /
-      ros2-cpp 4.4) still to do.
+      the rover's `/usr/local/cuda` + `LD_LIBRARY_PATH` pattern.
+- [x] 6.2b **On-device SOLVED — 233 ms/chunk via native torch + manual CUDA Graph capture.**
+      Built the "impossible" JP5 native stack from source (torch 2.2.2 cp310/CUDA 11.8/sm_72 via
+      `cuda-compat`, torchvision, lerobot 0.4.4 — image `wtlove876/smolvla-jetson:jp5-cu118`,
+      parity 2.8e-6 vs reference). Profiled eager fp16 (~630 ms): **launch-bound**, GPU ~80% idle
+      (GR3D 15–26%, EMC 12%, preproc 7 ms) — so per-op-compute levers do nothing (256M: 591 ms;
+      INT8 same category; full-TRT: 8 GB builder OOM; `torch.compile(cudagraphs)`: 622 ms, dynamo
+      breaks on the flow loop). The cure: **manual `torch.cuda.CUDAGraph` capture of the whole
+      forward** (static shapes + injectable noise; 3 constant-H2D blockers folded — torch.tensor
+      constants, HF vision patch mask, NaViT pos-ids): **eager 608 → 233 ms e2e, replay floor
+      211 ms, bitwise-identical actions (0.00 diff, also on new obs through the buffer copies)**,
+      +0.11 GB. Harness + writeup: `deploy/jetson-native-torch/` (`bench_cudagraph_manual.py`,
+      README "The fix"). Depth lever if <150 ms ever needed: 16/8/4 layers = 613/441/287 ms (retrain).
 - [ ] 6.3 On-device: run the §3 async stack (action queue + decoupled execution) on the NX
 - [ ] 6.4 On-device: run the VLM stage at low Hz relative to the control loop
-- [ ] 6.5 On-device: INT8 only via a real quantized/TensorRT engine on subgraphs that convert
-      (ORT TRT EP wired via `ORT_PROVIDER=tensorrt`; expect the ros2-cpp §5.6 TRT-parser wall)
+- [x] 6.5 On-device INT8/TensorRT — **closed by measurement, not needed**: the workload is
+      launch-bound (see 6.2b), so INT8/quantization attacks per-op compute and cannot help;
+      full-model TRT OOMs the 8 GB builder and the TRT parser rejects the flow-matching graph
+      (ros2-cpp §5.6 wall confirmed). CUDA Graph capture supersedes both.
 - [ ] 6.6 Log conversions honestly in `deploy/ondevice/conversion_notes.md` (what converted / what didn't / per-stage budget)
 - [ ] 6.7 Client/server split-latency tier measured from the NX as the client (the remote variant of task 3.8, re-run on real edge hardware)
