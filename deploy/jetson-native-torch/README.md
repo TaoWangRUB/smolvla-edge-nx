@@ -18,6 +18,8 @@ Two on-device paths were brought up on the Xavier NX, in order:
    - **Fine-tuned SmolVLA checkpoint runs on the GPU**: fp16 **627 ms/chunk**.
    - **Parity-verified** vs the reference torch (2.8e-6, cosine 1.0) + deployment report (fits 8 GB).
    - Published self-contained image: **`wtlove876/smolvla-jetson:jp5-cu118`** (Docker Hub, public).
+   - **Manual CUDA Graph capture of the full forward: 608 → 233 ms/chunk** (bitwise-identical
+     actions) — laptop-class latency on the Xavier, no retrain, no quantization.
 
 Build-infra note: the from-source build had to run on the **internal NVMe**, not the USB SSD — a
 Ugreen/RTL9210 USB enclosure **dropped off the bus three times** under sustained build I/O
@@ -60,10 +62,13 @@ peak CPU RSS 3.3 GB, actions valid (no NaN/Inf) and input-sensitive, latency ~0.
 | bf16 | 1795 ms | ❌ **Volta (sm_72) has no hardware bf16** — emulated, ~3× slower |
 | fp32 | 817 ms | no tensor cores |
 | **fp16** | **627 ms** | ✅ Volta fp16 tensor cores |
+| **fp16 + CUDA Graph replay** | **233 ms** | ✅✅ full-forward manual capture — see below |
 | ONNX-ORT (fp32) | ~610 ms | reference |
 
-Takeaway: on Volta, native torch **matches** ONNX but doesn't beat it (no flash-attention on
-sm_72; this lean build also drops mem-efficient attention). **Always `.half()` on Volta.**
+Takeaway: on Volta, native torch eager **matches** ONNX but doesn't beat it (no flash-attention
+on sm_72; this lean build also drops mem-efficient attention). **Always `.half()` on Volta.**
+With manual CUDA Graph capture (below) native torch then beats everything else on the board by
+~2.5× — landing at the laptop-server-class ~230 ms originally targeted.
 
 ## The build recipe
 
@@ -115,25 +120,68 @@ GPU-occupancy already establishes the low-occupancy conclusion.)
 "230 ms" laptop figure is a heavier fp32/server config; apples-to-apples fp16/3-step is 92 ms.)
 
 **Does ~630 ms block a mobile rover? No** — this is the key deployment point. Action chunking
-decouples inference from the control rate: one ~700 ms inference yields **50 actions**, executed
-with no network in between. At a rover's ~10 Hz base-control rate a 50-action chunk = **5 s of
-motion**, so the net runs once per ~5 s and the async runner hides it entirely. **On-device solely
-is viable** — offloading to a host (impractical on a moving robot) is unnecessary.
+decouples inference from the control rate: one inference yields **50 actions**, executed with no
+network in between. At a rover's ~10 Hz base-control rate a 50-action chunk = **5 s of motion**,
+so the net runs once per ~5 s and the async runner hides it entirely. **On-device solely is
+viable** — offloading to a host (impractical on a moving robot) is unnecessary.
 
-**Optimization levers, assessed (ranked by realism on this board):**
-1. **TensorRT / ORT-TRT-EP on the SigLIP vision encoder only** — the one worthwhile lever (fuses
-   the encoder's GEMMs/LayerNorms → fewer launches, attacking the launch-bound half). Full-stack
-   TRT OOMs the 8 GB builder and can't parse the flow-matching dynamo graph (both confirmed
-   earlier). Realistic **~15–25% end-to-end** (~630 → ~500 ms); can't reach laptop numbers.
-2. **INT8** — accuracy-gated; TRT-INT8 calibration is the heavy path.
-3. **`torch.compile` / CUDA graphs** — dead here (no triton wheel for CUDA-11.8 aarch64).
-4. **Newer hardware (Orin NX)** — highest ROI if <300 ms is truly required; no software knob
-   closes the Volta gap.
+## The fix: manual CUDA Graph capture (608 → 233 ms, 2.6×)
+
+Launch-bound means the classical cure is **record-once-replay**: capture the entire kernel
+stream and replay it with a single launch, eliminating all per-op CPU dispatch.
+`torch.compile(backend="cudagraphs")` gave only ~4% — **dynamo** breaks on the flow-matching
+loop — but that is a *tracing* failure, not a capture failure. Manual `torch.cuda.CUDAGraph`
+capture records the raw stream from the **unmodified eager code**, and this workload is secretly
+static-shape: fixed camera resolution (512×512), fixed 48-token padded task, fixed 3 flow steps,
+fixed 50×32 chunk, and injectable noise (`sample_actions(noise=…)`).
+
+`bench_cudagraph_manual.py` captures the **full forward** (SigLIP encoder + 16-layer VLM prefix
++ all 3 denoise steps) as ONE graph. Three capture-blockers had to be neutralized, all constant
+H2D copies of constants:
+1. `torch.tensor(list/scalar)` constants inside `embed_prefix`/`embed_suffix`/the flow loop
+   (attention-mask lists, the √dim scale, the 3 time scalars) — value-keyed constant folding of
+   `torch.tensor` during warmup+capture (7 constants folded).
+2. The HF vision tower's `patch_attention_mask` (created on CPU, `.to(cuda)` per call) —
+   inject a precomputed all-ones bool GPU mask.
+3. The NaViT position-ids loop in `SmolVLMVisionEmbeddings` (`.cpu()` syncs) — precompute
+   position ids once and swap in a capture-safe embeddings forward (verified `max-abs-diff = 0`).
+
+Per inference, only the observation/state/lang/noise buffers are `copy_`'d and the graph
+replayed. **Results (Xavier NX, fp16, 3 steps, single run):**
+
+| | latency |
+|---|---|
+| eager fp16 e2e | 608 ms |
+| **graph replay only (model fwd, zero CPU dispatch)** | **211 ms** |
+| **graphed e2e (preproc + copies + replay + post)** | **233 ms** |
+
+Parity: replay vs eager on identical inputs **max-abs-diff = 0.00, cosine = 1.000000** (bitwise —
+same kernels, same order), and replay vs eager on a *new* observation through the buffer copies is
+also 0.00. Memory cost: +0.11 GB reserved (1.18 total). This also **confirms the diagnosis**: the
+GPU's real work is 211 ms; the other ~400 ms of eager wall time was pure CPU dispatch overhead.
+
+Constraint: shapes are baked at capture (camera resolution, tokenized-task padding, flow steps,
+chunk size). Task *content* may change (tokens flow through the input buffers); a resolution or
+config change needs a one-off re-capture (~30 s at startup).
+
+**Optimization levers, assessed (final):**
+1. **Manual CUDA Graph capture — DONE, 2.6×** (608 → 233 ms). The winning lever; everything
+   below is now moot or secondary on this board.
+2. **TensorRT** — right idea (fusion = fewer launches) but full-stack TRT OOMs the 8 GB builder
+   and can't parse the flow-matching graph (confirmed); encoder-only TRT (~15–25%) superseded.
+3. **INT8 / narrower (256M) / precision tricks** — attack per-op *compute*, not op count: proven
+   no help (256M random-weight: 591 ms) on a launch-bound workload.
+4. **Fewer VLM layers** — linear (16/8/4 layers = 613/441/287 ms) but needs retrain; composes
+   with graph capture if <150 ms is ever needed.
+5. **`torch.compile` inductor** — dead (no triton wheel for CUDA-11.8 aarch64);
+   `backend="cudagraphs"` ~4% (dynamo graph breaks). Superseded by manual capture.
+6. **Orin NX** — no longer required to hit ~230 ms.
 
 **Debug toolkit** (this directory, all runnable in the image): `parity_check.py` (cross-device
 numeric parity), `verify_report.py` (memory/validity/latency), `profile_infer.py` (CPU-vs-GPU op
 profile), `stage_breakdown.py` (processor/model/post timing), `copy_experiment.py` (autocast vs
-pure-fp16), `kernel_count.py` (occupancy). Run any via
+pure-fp16), `kernel_count.py` (occupancy), `bench_cudagraph_manual.py` (CUDA Graph capture +
+parity + bench). Run any via
 `docker run --runtime nvidia … wtlove876/smolvla-jetson:jp5-cu118 python3 /repo/deploy/jetson-native-torch/<script>.py`.
 
 ## The published image
