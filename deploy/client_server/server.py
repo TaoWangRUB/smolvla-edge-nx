@@ -41,7 +41,7 @@ class PolicyServicer(policy_pb2_grpc.PolicyServicer):
         self.policy_path = policy_path
         self.precision = precision
         self.policy, self.device = load_policy(policy_path, device)
-        if precision == "fp16":
+        if precision.startswith("fp16"):
             self.policy = self.policy.half()
         if flow_steps is not None:
             self.policy.config.num_steps = flow_steps
@@ -58,7 +58,9 @@ class PolicyServicer(policy_pb2_grpc.PolicyServicer):
 
             self._chunk_predictors[task] = make_chunk_predictor(
                 self.policy, self.policy_path, self.device, task or None,
-                precision="fp32",  # server-side autocast measured slower; keep native
+                # fp16-graph = CUDA-graph replay (the edge fix); otherwise keep native
+                # fp32 — server-side autocast measured slower on the dev box
+                precision="fp16-graph" if self.precision == "fp16-graph" else "fp32",
             )
         return self._chunk_predictors[task]
 
@@ -140,7 +142,7 @@ def main() -> None:
     ap = argparse.ArgumentParser(description="SmolVLA gRPC policy server.")
     ap.add_argument("--policy-path", required=True)
     ap.add_argument("--device", default="auto")
-    ap.add_argument("--precision", choices=["fp32", "fp16"], default="fp16")
+    ap.add_argument("--precision", choices=["fp32", "fp16", "fp16-graph"], default="fp16")
     ap.add_argument("--flow-steps", type=int, default=None,
                     help="(SmolVLA) override flow-matching denoising steps")
     ap.add_argument("--noise-seed", type=int, default=None,

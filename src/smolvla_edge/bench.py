@@ -98,6 +98,12 @@ def run(args) -> dict:
 
     stats = timer.summary().get("select_action", {})
     mean_ms = stats.get("mean_ms", float("nan"))
+    # action-chunk frequency: with chunking on, one chunk inference serves chunk_size
+    # select_action calls, so chunks/s = 1 / (mean-per-step * chunk_size)
+    chunk_size = getattr(getattr(policy, "config", None), "chunk_size", None)
+    chunk_hz = (round(1000.0 / (mean_ms * chunk_size), 3)
+                if args.chunking == "on" and chunk_size and mean_ms == mean_ms and mean_ms > 0
+                else None)
     result = {
         "tag": args.tag,
         "policy_path": args.policy_path,
@@ -109,6 +115,7 @@ def run(args) -> dict:
         "latency_p50_ms": round(stats.get("p50_ms", float("nan")), 3),
         "latency_p95_ms": round(stats.get("p95_ms", float("nan")), 3),
         "throughput_hz": round(1000.0 / mean_ms, 3) if mean_ms == mean_ms and mean_ms > 0 else None,
+        "action_chunk_hz": chunk_hz,
         "peak_gpu_mem_mb": round(peak_gpu_memory_mb(device) or 0.0, 1),
         "host": platform.node(),
         "platform": platform.platform(),

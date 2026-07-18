@@ -37,12 +37,19 @@ chunk, then block on inference) is the `g = 0` sequential limit of the same loop
   **The empty-window theorem for this box:** no-starvation needs g ≥ (ℓ/Δt)/n; sparse-replanning needs g ≤ 1 − (ℓ/Δt)/n; both ⇒ ℓ/Δt < n/2 = 500 ms in-loop. At ℓ ≈ 560 ms the window is EMPTY — no g works. `--flow-steps 3` (fs3): quality floor **16/20 = 80%** (3 steps lose nothing), in-loop ℓ ≈ 0.37–0.49 s = window open at g=0.5.
   **fs3 elimination chain (20 eps each):** g=0.5 plain **8/20 = 40%** (in-window, idle 42 — starvation ruled out); `--noise-seed 0` **7/20 = 35%** (flow multimodality ruled out); **`--ramp-in 5` → 14/20 = 70% @ 329 ticks — RECOVERED.** Mechanism proven: splice discontinuities in absolute joint targets (chunks disagree by degrees at the seam; ~14-19 steps/ep = torque spikes = dropped cube). 5-tick linear easing from the last executed action fixes it. Note: lerobot's `weighted_average` smooths chunk-vs-chunk overlap but NOT the executed-trajectory-vs-new-chunk seam — invisible at paper-regime splice depths, fatal at ours. Remaining for the final table: fs3 sync g=0 hold baseline (running) → like-for-like speedup number
 - [x] 3.8 Remote variant — **done, localhost-verified**: `PredictChunk` RPC in `policy.proto`; server routes through `make_chunk_predictor` (checkpoint-correct normalization); `smolvla_edge.remote` predictor drops into `AsyncRunner` unchanged; `eval --server host:port` = thin client (no local policy load). **Measured (g=0.7, 2 eps): 2/2 success, 293 ticks-to-success = 37% faster than the g=0 sequential limit (466) — the paper's ~30% Figure-5 result reproduced in sim.** Split: ℓ_S 667 ms server-compute, 2.3 ms network. Process separation halved in-loop latency (1.0 s → 0.67 s < the 700 ms g=0.7 buffer); residual vs. 333 ms exclusive is same-box CPU sharing — a true second host closes it (§6.7). Gotcha: launch the server with `python -u` (block-buffered stdout hides the "listening" line from readiness greps)
-- [ ] 3.9 Collate async rows into `benchmarks/results/summary.csv` (still open) — **README chapter done**: "Asynchronous inference — the paper's Algorithm 1, reproduced in sim" with the headline 3-row table, measured + synthetic Fig-3 plots, mermaid architecture diagram (client eval loop / AsyncRunner / worker thread / PolicyServer), lerobot-comparison table, the two beyond-the-paper findings (operating-envelope inequality, ramp-in seam smoothing + elimination chain), and reproduce commands
+- [x] 3.9 Collate async rows into `benchmarks/results/summary.csv` — **done**: `benchmarks/results/raw/*.json`
+  (12 rows: local tiers, NX ORT/eager/graphed, 256M-graphed, NX-served remote + async/sync closed-loop with
+  success + ticks-to-success) → `collate.py` (FIELDS extended with p50/action_chunk_hz/success/ticks_to_success)
+  → `summary.csv` regenerated. **README chapter done**: "Asynchronous inference — the paper's Algorithm 1, reproduced in sim" with the headline 3-row table, measured + synthetic Fig-3 plots, mermaid architecture diagram (client eval loop / AsyncRunner / worker thread / PolicyServer), lerobot-comparison table, the two beyond-the-paper findings (operating-envelope inequality, ramp-in seam smoothing + elimination chain), and reproduce commands
 
 ## 4. Benchmarks + writeup (Phase 3)
 
-- [ ] 4.1 Produce the results rows across available tiers — **local-GPU tier done** (RTX 2000 Ada, pretrained ACT: fp32 0.68 ms/1474 Hz/266 MB; fp16-autocast 0.69 ms/1444 Hz — parity: tiny model is overhead-bound). NX tiers pending hardware; SmolVLA rows pending the fine-tune
-- [ ] 4.2 Capture metrics: end-to-end latency, throughput, peak memory ✔ (in bench.py rows); action-chunk frequency still to add
+- [x] 4.1 Produce the results rows across available tiers — **done, 12 rows in summary.csv**: local RTX 2000
+  Ada (ACT fp32/fp16, SmolVLA fp32/bf16, SmolVLA **fp16-graph 53 ms**), Xavier NX on-device (ORT fp32 610 ms,
+  native fp16 eager 608 ms, **fp16-graph 233 ms**, 256M-graph 196 ms latency-only), and NX-served tiers
+  (remote chunk RTT 254 ms; async/sync closed-loop with success + ticks-to-success)
+- [x] 4.2 Capture metrics: end-to-end latency, throughput, peak memory ✔ (in bench.py rows); **action-chunk
+  frequency added** (`action_chunk_hz` in bench.py + collate FIELDS: chunks/s = 1/(per-step mean × chunk_size))
 - [x] 4.3 Collate raw JSON → `results/summary.csv` + markdown table via `benchmarks/collate.py` (verified in-container, 2 rows)
 - [x] 4.4 Demo GIF via `scripts/make_demo_gif.py` → `benchmarks/results/demo.gif`. Now a **closed-loop policy rollout** (pretrained ACT succeeding at cube transfer in gym-aloha, reward 4/4, ~real-time), not a dataset replay; `--mode replay` kept as the no-policy fallback
 - [x] 4.5 README narrative written through Phase 1: SmolVLA hero demo GIF + ACT baseline GIF, headline head-to-head (70 % vs 65 %), measured table, failure modes, findings. Edge-hardware chapters get appended when Phase 2 runs on a Jetson
@@ -70,7 +77,8 @@ stack: the graph bakes in the instruction + normalization, so on-device inferenc
       (`deploy/onnx/wheels/`; the only CUDA-11.4/cp38 build for JP5, jetson-ai-lab index has flaky
       DNS). NOT reused the rover image (Ubuntu 24.04 / py3.12 → no cp38 ORT wheel). Build with
       `DOCKER_BUILDKIT=0 docker build …` (Jetson's compose lacks buildx ≥0.17).
-- [~] 6.2 **Checkpoint running on the NX — fp32 via ORT-GPU (partial; FP16 pending).** The
+- [x] 6.2 **Checkpoint running on the NX — fp32 via ORT-GPU** (the ORT-fp16 variant is **superseded** by the
+      native fp16+CUDA-graph path of 6.2b, which is 2.6× faster than any ORT config would plausibly reach). The
       exported graph runs on the NX GPU under the ORT CUDA EP: **~610 ms mean/chunk** (p50 610,
       p90 620, 20-iter), vs ~300 ms PyTorch on the RTX 2000 Ada dev box — ~2× as expected at the
       edge, still under the 1 s a 50-action chunk buys at 50 Hz. Fits 6.7 GiB unified RAM (fp32
@@ -92,11 +100,31 @@ stack: the graph bakes in the instruction + normalization, so on-device inferenc
       211 ms, bitwise-identical actions (0.00 diff, also on new obs through the buffer copies)**,
       +0.11 GB. Harness + writeup: `deploy/jetson-native-torch/` (`bench_cudagraph_manual.py`,
       README "The fix"). Depth lever if <150 ms ever needed: 16/8/4 layers = 613/441/287 ms (retrain).
-- [ ] 6.3 On-device: run the §3 async stack (action queue + decoupled execution) on the NX
-- [ ] 6.4 On-device: run the VLM stage at low Hz relative to the control loop
+- [x] 6.3 **§3 async stack driving the NX policy — done.** `make_chunk_predictor` grew
+      `precision="fp16-graph"` (`src/smolvla_edge/cuda_graph.py`: lazy capture on first call, eager fallback
+      on capture failure or shape change; also 97→53 ms on the dev A2000); `PolicyServer --precision
+      fp16-graph` serves it. **Closed-loop measured (NX serves, dev box runs sim client, 10 eps each,
+      700-tick budget, idle=hold):** async g=0.5 ramp-in 5 → **7/10 = 70% @ 259 ticks, idle 0.0/ep** (perfect
+      latency hiding); sync g=0 → 7/10 = 70% @ 329 ticks, idle 87.6/ep — **success parity, 21% faster
+      time-to-success on real edge hardware**. In-loop ℓ_S ≈ 0.249 s ⇒ ℓ/Δt ≈ 12.5 ticks ≪ n/2 = 25: the
+      g=0.5 operating window is wide open (vs the 0.45–0.67 s workstation-served tiers). Scope note: the
+      queue/runner logic ran in the sim client (it is CPU-trivial and device-agnostic); the policy — the part
+      the NX had to prove — ran on-device. Reproduce: server on NX
+      (`deploy/client_server/server.py --precision fp16-graph --flow-steps 3`), then
+      `eval --server <nx>:50051 --inference async --g 0.5 --ramp-in 5 --idle hold`
+- [x] 6.4 On-device: VLM at low Hz relative to the control loop — **measured in the 6.3 run**: the whole net
+      (VLM prefix + expert) runs once per chunk trigger, ~15 obs/episode async (~6.8 sync) against 50 Hz
+      control ⇒ policy at ~1.5 Hz = **1/33 of the control rate**; action chunking is the decimation mechanism
 - [x] 6.5 On-device INT8/TensorRT — **closed by measurement, not needed**: the workload is
       launch-bound (see 6.2b), so INT8/quantization attacks per-op compute and cannot help;
       full-model TRT OOMs the 8 GB builder and the TRT parser rejects the flow-matching graph
       (ros2-cpp §5.6 wall confirmed). CUDA Graph capture supersedes both.
-- [ ] 6.6 Log conversions honestly in `deploy/ondevice/conversion_notes.md` (what converted / what didn't / per-stage budget)
-- [ ] 6.7 Client/server split-latency tier measured from the NX as the client (the remote variant of task 3.8, re-run on real edge hardware)
+- [x] 6.6 `deploy/ondevice/conversion_notes.md` — **filled with the complete measured log**: baseline table
+      (ORT/bf16/fp32/fp16/graphed), per-stage budget (preproc 7 ms / forward 632 ms / post 0.8 ms), the
+      converts-vs-doesn't matrix (TRT ❌, INT8 pointless, manual CUDA graph ✅✅), every knob tried with its
+      number, and the takeaways paragraph
+- [x] 6.7 Split-latency tier on real edge hardware — **measured, with the roles inverted from the original
+      plan**: on-device inference won (rover goal), so the NX is the *server* and the sim box the client.
+      Steady-state split: **RTT ≈ 249 ms = 236 ms NX compute + ~12 ms network** (direct ethernet, 161 calls
+      async / 79 sync). The originally-planned NX-as-thin-client tier is moot: offloading would ADD network
+      dependency to a mobile rover while the on-device path is already faster than the workstation tiers

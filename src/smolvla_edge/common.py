@@ -12,6 +12,13 @@ import time
 from dataclasses import dataclass, field
 from typing import Iterator
 
+import torch
+
+if not hasattr(torch, "xpu"):
+    # from-source torch 2.2 on JetPack 5 (Xavier NX) predates torch.xpu; lerobot 0.4.4
+    # probes it unconditionally. No-op on official torch >= 2.4.
+    torch.xpu = type("xpu", (), {"is_available": staticmethod(lambda: False)})()
+
 
 def select_device(requested: str = "auto") -> str:
     """Resolve a torch device string. 'auto' prefers CUDA, then MPS, then CPU."""

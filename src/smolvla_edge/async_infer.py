@@ -259,7 +259,11 @@ def make_chunk_predictor(policy, policy_path: str, device: str, task: str | None
     two checkpoint formats (saved processor pipeline vs. manual mapping).
 
     ``precision="fp16"`` wraps the forward in CUDA autocast — the first lever for
-    cutting server latency l_S when it approaches the chunk duration n*dt."""
+    cutting server latency l_S when it approaches the chunk duration n*dt.
+    ``precision="fp16-graph"`` additionally halves the policy and lazily captures the
+    full ``sample_actions`` forward as one CUDA graph (the launch-bound fix — 608 ->
+    233 ms/chunk on the Xavier NX, bitwise-identical actions; see
+    ``smolvla_edge.cuda_graph``). Falls back to plain fp16 if capture fails."""
     import torch
 
     from .common import resolve_policy_path
@@ -267,9 +271,16 @@ def make_chunk_predictor(policy, policy_path: str, device: str, task: str | None
 
     policy_path = resolve_policy_path(policy_path)
 
-    use_amp = precision == "fp16" and str(device).startswith("cuda")
-    if precision == "fp16" and not use_amp:
-        print("[async] fp16 requested but device is not CUDA — running fp32")
+    on_cuda = str(device).startswith("cuda")
+    use_amp = precision in ("fp16", "fp16-graph") and on_cuda
+    if precision in ("fp16", "fp16-graph") and not use_amp:
+        print(f"[async] {precision} requested but device is not CUDA — running fp32")
+    if precision == "fp16-graph" and on_cuda:
+        policy.eval()
+        policy.half()  # fp16 tensor cores — the config the capture was validated against
+        from .cuda_graph import enable_lazy_graph
+
+        enable_lazy_graph(policy)
 
     def _forward(batch):
         with torch.no_grad(), torch.autocast(device_type="cuda", dtype=torch.float16,
