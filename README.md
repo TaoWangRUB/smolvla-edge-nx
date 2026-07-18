@@ -601,9 +601,42 @@ exit on fail) comparing the graph against the exact server path over 100 held-ou
 a fixed noise seed — **PASS at worst max-abs-diff 4.3e-6, worst cosine 0.99999988**
 ([onnx_parity.json](benchmarks/results/onnx_parity.json)).
 
-Next (see [tasks](openspec/changes/ros2-cpp-async-deployment/tasks.md)): a C++ ONNX Runtime
-inference server (CUDA/TensorRT EP) behind the same `Policy` proto, then a one-command gated
-deployment pipeline (export → parity → build → closed-loop regression).
+**Stage 2b — the C++ ORT server (honest negative) and how the gate actually passed.** The C++
+ONNX Runtime server (`deploy/cpp_server/`, CUDA EP, same `Policy` proto — clients run unmodified)
+is **wire-compatible and numerically correct** (parity 4e-6) but **kernel-execution-bound**: the
+TorchDynamo graph is 30 852 tiny unfused nodes, ~1.0 s/chunk on the A2000 (vs PyTorch's 229 ms),
+and TensorRT's parser rejects the graph (op-compat chain). Its 50-ep gate scored 11/50 = 22% —
+recorded as the negative result. The gate then **passed via the CUDA-graph path instead**: the
+same ROS2 stack against `policy-server --precision fp16-graph` (manual full-forward
+`torch.cuda.CUDAGraph` capture, 53 ms exclusive on the A2000, bitwise-identical actions):
+**36/50 = 72%, idle 0.0** — inside the binomial band of the 74–80% references
+([stage2_fp16graph_50ep.json](benchmarks/results/ros2/stage2_fp16graph_50ep.json)). Takeaway for
+the writeup: for this class of VLA graph, runtime-level fusion (ORT/TRT) lost to **recording the
+framework's own kernel stream** — same kernels, zero dispatch, no export at all.
+
+**Pipeline** (`scripts/deploy_pipeline.sh <checkpoint>`): one command chaining
+export → enforced parity → fp16-graph capture smoke → ROS2 closed-loop regression (≥60% gate) →
+collate, fail-fast with the failing gate named, artifacts + hash manifest under
+`benchmarks/results/pipeline/<ts>/`. Green run PASS + a forced parity failure
+(`PARITY_FLOW_STEPS=10`) demonstrating fail-fast are both committed as provenance examples.
+
+**All-ROS2: client AND policy server on ROS 2, no gRPC in the policy hop.** The final
+architecture question — can the policy hop itself be DDS? Yes, measured: the from-source JP5
+torch image is Ubuntu 22.04/py3.10, which is exactly **ROS 2 Humble's** target tier, so
+[docker/jetson_ros2_humble.Dockerfile](docker/jetson_ros2_humble.Dockerfile) overlays Humble +
+`smolvla_msgs` onto it, and [deploy/ros2/policy_node.py](deploy/ros2/policy_node.py) serves the
+**fp16-graph predictor as a native rclpy node on the Xavier NX** (`/policy/request` →
+`/policy/chunk`, request-id correlated). The C++ `async_client` gained `transport:=ros2`
+(gRPC remains the default). Cross-host, cross-distro DDS (Humble server on the NX ↔ Jazzy
+client on the dev box) discovered and interoperated on the custom message types out of the box.
+Closed loop, 10 episodes, same protocol: **8/10 = 80% success** — the same band as every healthy
+tier. Idle ticks tell the honest story: episode 0 paid 414 idle ticks (the **one-time lazy
+CUDA-graph capture** on the NX — pre-warm the node to remove it), then steady state was
+**9–17 idle ticks/ep** (~0.4 s of holds per ~30 s episode; the 900 KiB raw frame over reliable
+DDS is the remaining lever — JPEG on the wire, or pinning FastDDS to the direct ethernet link).
+For the rover this is the end-state shape: camera → `/observation` → **on-device policy node**
+→ `/action_chunk` → base controller, all DDS
+([allros2_nx_10ep.json](benchmarks/results/ros2/allros2_nx_10ep.json)).
 
 ---
 

@@ -1,0 +1,136 @@
+{
+  "mode": "ros2-stage",
+  "env_id": "gym_aloha/AlohaTransferCube-v0",
+  "episodes": 10,
+  "successes": 8,
+  "success_rate": 0.8,
+  "mean_idle_ticks": 34.4,
+  "fps": 50.0,
+  "timing_ms": {
+    "grpc_step": {
+      "n": 3269,
+      "p50": 18.836,
+      "p95": 23.656,
+      "mean": 19.027
+    },
+    "dds_roundtrip": {
+      "n": 2971,
+      "p50": 11.513,
+      "p95": 12.293,
+      "mean": 8.449
+    }
+  },
+  "per_episode": [
+    {
+      "episode": 0,
+      "seed": 0,
+      "success": true,
+      "max_reward": 4.0,
+      "ticks": 250,
+      "idle_ticks": 27,
+      "wall_s": 18.38,
+      "tick_ms_p50": 40.008,
+      "tick_ms_p95": 40.385
+    },
+    {
+      "episode": 1,
+      "seed": 1,
+      "success": true,
+      "max_reward": 4.0,
+      "ticks": 275,
+      "idle_ticks": 27,
+      "wall_s": 10.881,
+      "tick_ms_p50": 39.992,
+      "tick_ms_p95": 40.314
+    },
+    {
+      "episode": 2,
+      "seed": 2,
+      "success": false,
+      "max_reward": 2.0,
+      "ticks": 400,
+      "idle_ticks": 36,
+      "wall_s": 14.9,
+      "tick_ms_p50": 39.97,
+      "tick_ms_p95": 40.273
+    },
+    {
+      "episode": 3,
+      "seed": 3,
+      "success": true,
+      "max_reward": 4.0,
+      "ticks": 292,
+      "idle_ticks": 55,
+      "wall_s": 11.928,
+      "tick_ms_p50": 40.01,
+      "tick_ms_p95": 60.03
+    },
+    {
+      "episode": 4,
+      "seed": 4,
+      "success": true,
+      "max_reward": 4.0,
+      "ticks": 387,
+      "idle_ticks": 33,
+      "wall_s": 16.156,
+      "tick_ms_p50": 40.013,
+      "tick_ms_p95": 59.974
+    },
+    {
+      "episode": 5,
+      "seed": 5,
+      "success": true,
+      "max_reward": 4.0,
+      "ticks": 263,
+      "idle_ticks": 20,
+      "wall_s": 10.597,
+      "tick_ms_p50": 40.002,
+      "tick_ms_p95": 40.257
+    },
+    {
+      "episode": 6,
+      "seed": 6,
+      "success": true,
+      "max_reward": 4.0,
+      "ticks": 323,
+      "idle_ticks": 35,
+      "wall_s": 11.88,
+      "tick_ms_p50": 39.961,
+      "tick_ms_p95": 40.281
+    },
+    {
+      "episode": 7,
+      "seed": 7,
+      "success": true,
+      "max_reward": 4.0,
+      "ticks": 336,
+      "idle_ticks": 41,
+      "wall_s": 13.286,
+      "tick_ms_p50": 39.992,
+      "tick_ms_p95": 59.749
+    },
+    {
+      "episode": 8,
+      "seed": 8,
+      "success": true,
+      "max_reward": 4.0,
+      "ticks": 343,
+      "idle_ticks": 35,
+      "wall_s": 13.76,
+      "tick_ms_p50": 39.997,
+      "tick_ms_p95": 58.795
+    },
+    {
+      "episode": 9,
+      "seed": 9,
+      "success": false,
+      "max_reward": 2.0,
+      "ticks": 400,
+      "idle_ticks": 35,
+      "wall_s": 16.282,
+      "tick_ms_p50": 40.004,
+      "tick_ms_p95": 42.278
+    }
+  ],
+  "note": "ROS2 bridge closed-loop; success = gym-aloha reward>=4"
+}
