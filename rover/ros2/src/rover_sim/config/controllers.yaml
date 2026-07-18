@@ -1,0 +1,49 @@
+# Copied from ackermann_rover_humble description_robot/config/ackermann_controller.yaml
+# (same real-vehicle parameters; topic remaps live in the URDF plugin block).
+controller_manager:
+  ros__parameters:
+    update_rate: 50
+    use_sim_time: true
+
+    joint_state_broadcaster:
+      type: joint_state_broadcaster/JointStateBroadcaster
+
+    ackermann_steering_controller:
+      type: ackermann_steering_controller/AckermannSteeringController
+
+joint_state_broadcaster:
+  ros__parameters:
+    use_sim_time: true
+
+ackermann_steering_controller:
+  ros__parameters:
+    use_sim_time: true
+    wheelbase: 0.174
+    front_wheel_track: 0.174
+    rear_wheel_track: 0.174
+    front_wheels_radius: 0.0385
+    rear_wheels_radius: 0.0385
+    front_steering: true
+    reference_timeout: 2.0
+
+    # Rear wheels are the drive wheels
+    rear_wheels_names:
+      ["ackermann/rear_right_wheel_joint", "ackermann/rear_left_wheel_joint"]
+
+    # Front wheels are the steered wheels (steering joints, not wheel joints)
+    front_wheels_names:
+      [
+        "ackermann/front_right_wheel_steering_joint",
+        "ackermann/front_left_wheel_steering_joint",
+      ]
+
+    open_loop: false
+    publish_rate: 50.0
+    position_feedback: false
+    enable_odom_tf: false
+
+    odom_frame_id: odom
+    base_frame_id: ackermann/base_link
+
+    twist_covariance_diagonal: [0.0, 7.0, 14.0, 21.0, 28.0, 35.0]
+    pose_covariance_diagonal: [0.0, 7.0, 14.0, 21.0, 28.0, 35.0]
