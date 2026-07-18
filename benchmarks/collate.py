@@ -15,7 +15,7 @@ HERE = Path(__file__).resolve().parent
 RAW = HERE / "results" / "raw"
 OUT_CSV = HERE / "results" / "summary.csv"
 
-# Union of fields emitted by bench.py and the gRPC client; missing -> blank.
+# Union of fields emitted by bench.py, the gRPC client, and the async eval; missing -> blank.
 FIELDS = [
     "tag",
     "device",
@@ -23,12 +23,16 @@ FIELDS = [
     "chunking",
     "steps_measured",
     "latency_mean_ms",
+    "latency_p50_ms",
     "latency_p95_ms",
     "rtt_mean_ms",
     "rtt_p95_ms",
     "server_compute_mean_ms",
     "network_overhead_mean_ms",
     "throughput_hz",
+    "action_chunk_hz",
+    "success",
+    "ticks_to_success",
     "peak_gpu_mem_mb",
 ]
 

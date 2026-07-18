@@ -160,6 +160,23 @@ same kernels, same order), and replay vs eager on a *new* observation through th
 also 0.00. Memory cost: +0.11 GB reserved (1.18 total). This also **confirms the diagnosis**: the
 GPU's real work is 211 ms; the other ~400 ms of eager wall time was pure CPU dispatch overhead.
 
+**Once dispatch is gone, the bottleneck moves back to GPU compute — and width finally pays**
+(`bench_cudagraph_256m.py`, same run protocol):
+
+| backbone | eager | graphed e2e | replay floor | peak mem |
+|---|---|---|---|---|
+| 450M (SmolVLM2-500M) | 581 ms | 237 ms | 215 ms | 1.02 GB |
+| 256M (SmolVLM2-256M) | 577 ms | **196 ms** | 176 ms | 0.61 GB |
+
+Eager, the 256M backbone bought nothing (launch-bound ⇒ latency tracks op count). Graphed, it's
+~17% faster — proof the workload became compute-bound. A 256M *fine-tune* would ship at ~196 ms.
+
+**Productionized** as `make_chunk_predictor(..., precision="fp16-graph")`
+(`src/smolvla_edge/cuda_graph.py`): the first call runs eager and lazily captures; any capture
+failure falls back to eager fp16; a shape change (camera resolution / token padding) falls back
+per-call. The gRPC `PolicyServer` exposes it as `--precision fp16-graph`. Also verified on the
+dev box (RTX A2000): eager 97 ms → **53 ms** — the laptop was partly launch-bound too.
+
 Constraint: shapes are baked at capture (camera resolution, tokenized-task padding, flow steps,
 chunk size). Task *content* may change (tokens flow through the input buffers); a resolution or
 config change needs a one-off re-capture (~30 s at startup).
@@ -181,7 +198,8 @@ config change needs a one-off re-capture (~30 s at startup).
 numeric parity), `verify_report.py` (memory/validity/latency), `profile_infer.py` (CPU-vs-GPU op
 profile), `stage_breakdown.py` (processor/model/post timing), `copy_experiment.py` (autocast vs
 pure-fp16), `kernel_count.py` (occupancy), `bench_cudagraph_manual.py` (CUDA Graph capture +
-parity + bench). Run any via
+parity + bench), `bench_cudagraph_256m.py` (450M-vs-256M under capture),
+`smoke_fp16_graph.py` (the integrated `precision="fp16-graph"` mode). Run any via
 `docker run --runtime nvidia … wtlove876/smolvla-jetson:jp5-cu118 python3 /repo/deploy/jetson-native-torch/<script>.py`.
 
 ## The published image

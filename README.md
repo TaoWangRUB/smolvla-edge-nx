@@ -111,7 +111,7 @@ edge deployment and latency engineering.
 
 ## Roadmap
 
-Progress: **30 / 38 tasks** — details in
+Progress: **38 / 38 tasks — complete** — details in
 [the change tasks](openspec/changes/smolvla-edge-deployment/tasks.md).
 
 **Headline result — the head-to-head is in: the fine-tuned SmolVLA wins.** On
@@ -126,8 +126,8 @@ gap (36 Hz ceiling vs the 50 Hz control loop) is exactly what the edge phase exi
 |-------|------|--------|-------|
 | 0 | **Scaffold + environment** — repo, pins, host env, **Docker env** | ✅ 6/6 | matched-mujoco container built & verified |
 | 1 | **Correctness (sim)** — verify-first, fine-tune SmolVLA, closed-loop eval | ✅ 6/6 | **Deliverable: fine-tuned SmolVLA 70 % success** (transfer cube, 20 eps, matched mujoco) vs official ACT baseline **65 %** on identical seeds; trained 20k steps on Colab A100 |
-| 2 | **Edge deployment** — Xavier NX on-device + client/server | 🔄 3/8 | **On-device solved: 233 ms/chunk** — native from-source torch 2.2.2 (JP5 "impossible" build), fp16 + **manual CUDA Graph capture of the full forward** (608 → 233 ms, bitwise-exact). Torch-free fallback: pure-Python ORT GPU ~610 ms (CUDA EP, fp32). On-device async still pending |
-| 3 | **Benchmarks + writeup** — latency table + demo GIF + narrative | 🔄 3/5 | ✅ demo GIFs (fine-tuned SmolVLA + ACT baseline, latency overlays), collate, narrative through Phase 1; NX benchmark tiers now unblocked (first on-device number below) |
+| 2 | **Edge deployment** — Xavier NX on-device + client/server | ✅ 8/8 | **On-device solved: 233 ms/chunk** — native from-source torch 2.2.2 (JP5 "impossible" build), fp16 + **manual CUDA Graph capture of the full forward** (608 → 233 ms, bitwise-exact), productionized as `precision="fp16-graph"`. **Closed-loop from the NX: async 70% @ 259 ticks, 0 idle** (vs sync 70% @ 329) at in-loop ℓ_S ≈ 0.25 s. Torch-free fallback: pure-Python ORT GPU ~610 ms |
+| 3 | **Benchmarks + writeup** — latency table + demo GIF + narrative | ✅ 5/5 | demo GIFs, 12-tier `summary.csv` (local A2000 / NX on-device / NX-served closed-loop, incl. `action_chunk_hz`), conversion log (`deploy/ondevice/conversion_notes.md`), narrative through the edge phase |
 
 **Measured so far** (evaluated on RTX 2000 Ada, matched-mujoco container; SmolVLA trained on a Colab A100):
 
@@ -317,6 +317,27 @@ matches the ~230 ms laptop-class target** with no retrain and no quantization �
 case needs no host offload at all. Self-contained image: `wtlove876/smolvla-jetson:jp5-cu118`
 (Docker Hub).
 
+Two corollaries worth knowing: once dispatch is gone the board is compute-bound again, so
+**model width finally matters** — the 256M backbone, useless eager (577 vs 581 ms), drops to
+**196 ms** graphed (a 256M fine-tune would ship that). And the same capture helps the dev box
+too: RTX A2000 97 → **53 ms**. The recipe is productionized as
+`make_chunk_predictor(..., precision="fp16-graph")` (`src/smolvla_edge/cuda_graph.py` — lazy
+capture on first call, eager fallback) and `PolicyServer --precision fp16-graph`.
+
+**Closed-loop from the edge — the finish line.** With the NX *serving* the policy (gRPC over
+direct ethernet) and the dev box running the sim client, the full §async stack was measured
+end-to-end on real edge hardware (10 eps each, 700-tick budget):
+
+| NX-served (ℓ_S ≈ 0.249 s = 236 ms compute + 12 ms network) | Success | Ticks-to-success | Idle ticks/ep |
+|---|---|---|---|
+| **Async (g=0.5, ramp-in 5)** | **7/10 = 70%** | **259** | **0.0** |
+| Sync (g=0) | 7/10 = 70% | 329 | 87.6 |
+
+Success parity with the dev-box reference (70%), **21% faster time-to-success, zero idle
+ticks** — at 0.25 s in-loop latency the async operating window (ℓ/Δt ≈ 12.5 ≪ n/2 = 25) is
+wide open, so inference hides completely behind execution. The policy ran ~15×/episode against
+the 50 Hz control loop — the VLM effectively at 1.5 Hz, 1/33 of the control rate.
+
 ```bash
 # on the Jetson (repo at ~/workspace/smolvla-edge-nx). One-time build (buildx-free):
 DOCKER_BUILDKIT=0 docker build -f docker/jetson_infer.Dockerfile -t smolvla-edge:jetson .
@@ -355,7 +376,9 @@ chunk latency ≈ 0.45 s):
 | **Async (`--g 0.5 --ramp-in 5`)** | **14/20 = 70%** | **329** | 78 |
 
 **Success parity, 19% faster time-to-success** — the paper's Figure-5 claim, measured
-end-to-end in simulation. Queue dynamics match the paper's Figure 3 (sync's dead
+end-to-end in simulation. (The same stack later ran against the **Xavier NX serving the policy
+on-device** at ℓ_S ≈ 0.25 s: async 70% @ 259 ticks with **zero** idle — see
+[the edge section](#on-device-solved-233-mschunk-via-native-torch--cuda-graph-capture).) Queue dynamics match the paper's Figure 3 (sync's dead
 zero-dwells vs async's floor-avoiding zigzag; right plot is the stack under a synthetic
 140 ms server, proving the implementation reproduces the paper's exact shapes when the
 server is fast):
