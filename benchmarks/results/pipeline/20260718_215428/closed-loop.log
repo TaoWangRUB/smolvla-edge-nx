@@ -1,0 +1,72 @@
+time="2026-07-18T21:55:55+02:00" level=warning msg="/home/taowang/workspace/smolvla-edge-nx/docker-compose.yml: the attribute `version` is obsolete, it will be ignored, please remove it to avoid potential confusion"
+ Container smolvla-edge-nx-policy-server-1  Recreate
+ Container smolvla-edge-nx-sim-server-1  Recreate
+ Container smolvla-edge-nx-sim-server-1  Recreated
+ Container smolvla-edge-nx-policy-server-1  Recreated
+ Container smolvla-edge-nx-policy-server-1  Starting
+ Container smolvla-edge-nx-sim-server-1  Starting
+ Container smolvla-edge-nx-policy-server-1  Started
+ Container smolvla-edge-nx-sim-server-1  Started
+time="2026-07-18T21:56:11+02:00" level=warning msg="/home/taowang/workspace/smolvla-edge-nx/docker-compose.yml: the attribute `version` is obsolete, it will be ignored, please remove it to avoid potential confusion"
+[INFO] [launch]: All log files can be found below /home/taowang/.ros/log/2026-07-18-19-56-13-412747-e213159f456c-41
+[INFO] [launch]: Default logging verbosity is set to INFO
+[INFO] [async_client-1]: process started with pid [46]
+[INFO] [event_recorder-2]: process started with pid [47]
+[INFO] [sim_bridge-3]: process started with pid [48]
+[async_client-1] [WARN] [1784404573.570814238] [rcl]: ROS_LOCALHOST_ONLY is deprecated but still honored if it is enabled. Use ROS_AUTOMATIC_DISCOVERY_RANGE and ROS_STATIC_PEERS instead.
+[async_client-1] [WARN] [1784404573.570829667] [rcl]: 'localhost_only' is enabled, 'automatic_discovery_range' and 'static_peers' will be ignored.
+[async_client-1] [INFO] [1784404573.611588760] [async_client]: policy server policy-server:50051: device=cuda precision=fp16-graph g=0.50 epsilon=0.000
+[event_recorder-2] [WARN] [1784404573.710605452] [rcl]: ROS_LOCALHOST_ONLY is deprecated but still honored if it is enabled. Use ROS_AUTOMATIC_DISCOVERY_RANGE and ROS_STATIC_PEERS instead.
+[event_recorder-2] [WARN] [1784404573.710616398] [rcl]: 'localhost_only' is enabled, 'automatic_discovery_range' and 'static_peers' will be ignored.
+[event_recorder-2] [INFO] [1784404573.831512416] [event_recorder]: recording /events -> /workspace/benchmarks/results/pipeline/20260718_215428/closed_loop_events.jsonl
+[sim_bridge-3] [WARN] [1784404573.908787487] [rcl]: ROS_LOCALHOST_ONLY is deprecated but still honored if it is enabled. Use ROS_AUTOMATIC_DISCOVERY_RANGE and ROS_STATIC_PEERS instead.
+[sim_bridge-3] [WARN] [1784404573.908797167] [rcl]: 'localhost_only' is enabled, 'automatic_discovery_range' and 'static_peers' will be ignored.
+[sim_bridge-3] [INFO] [1784404573.990573158] [sim_bridge]: SimEnv at sim-server:50052: gym_aloha/AlohaTransferCube-v0 action_dim=14 max_steps=400; running 5 episodes at 50.0 Hz
+[sim_bridge-3] [INFO] [1784404574.125740821] [sim_bridge]: episode 1/5 (seed=0)
+[async_client-1] [INFO] [1784404574.138982024] [async_client]: episode 0
+[sim_bridge-3] [INFO] [1784404584.755761880] [sim_bridge]: episode 1: success=True max_reward=4.0 ticks=220 idle=0 tick p50/p95 39.95/40.24 ms
+[sim_bridge-3] [INFO] [1784404584.773393604] [sim_bridge]: episode 2/5 (seed=1)
+[async_client-1] [INFO] [1784404584.784165566] [async_client]: episode 1
+[sim_bridge-3] [INFO] [1784404594.543062367] [sim_bridge]: episode 2: success=True max_reward=4.0 ticks=262 idle=0 tick p50/p95 39.982/40.206 ms
+[sim_bridge-3] [INFO] [1784404594.556005939] [sim_bridge]: episode 3/5 (seed=2)
+[async_client-1] [INFO] [1784404594.566744671] [async_client]: episode 2
+[sim_bridge-3] [INFO] [1784404606.843208393] [sim_bridge]: episode 3: success=True max_reward=4.0 ticks=327 idle=0 tick p50/p95 39.974/40.245 ms
+[sim_bridge-3] [INFO] [1784404606.858180065] [sim_bridge]: episode 4/5 (seed=3)
+[async_client-1] [INFO] [1784404606.859817077] [async_client]: episode 3
+[sim_bridge-3] [INFO] [1784404616.646092165] [sim_bridge]: episode 4: success=True max_reward=4.0 ticks=243 idle=0 tick p50/p95 39.998/40.206 ms
+[sim_bridge-3] [INFO] [1784404616.659708777] [sim_bridge]: episode 5/5 (seed=4)
+[async_client-1] [INFO] [1784404616.678553107] [async_client]: episode 4
+[sim_bridge-3] [INFO] [1784404631.899407973] [sim_bridge]: episode 5: success=False max_reward=2.0 ticks=400 idle=0 tick p50/p95 39.98/40.266 ms
+[sim_bridge-3] [INFO] [1784404631.900970761] [sim_bridge]: results -> /workspace/benchmarks/results/pipeline/20260718_215428/closed_loop.json
+[sim_bridge-3] [INFO] [1784404631.901272205] [sim_bridge]: all episodes done
+[sim_bridge-3] {
+[sim_bridge-3]   "mode": "ros2-stage",
+[sim_bridge-3]   "env_id": "gym_aloha/AlohaTransferCube-v0",
+[sim_bridge-3]   "episodes": 5,
+[sim_bridge-3]   "successes": 4,
+[sim_bridge-3]   "success_rate": 0.8,
+[sim_bridge-3]   "mean_idle_ticks": 0.0,
+[sim_bridge-3]   "fps": 50.0,
+[sim_bridge-3]   "timing_ms": {
+[sim_bridge-3]     "grpc_step": {
+[sim_bridge-3]       "n": 1452,
+[sim_bridge-3]       "p50": 16.416,
+[sim_bridge-3]       "p95": 19.735,
+[sim_bridge-3]       "mean": 16.093
+[sim_bridge-3]     },
+[sim_bridge-3]     "dds_roundtrip": {
+[sim_bridge-3]       "n": 1452,
+[sim_bridge-3]       "p50": 11.663,
+[sim_bridge-3]       "p95": 12.211,
+[sim_bridge-3]       "mean": 9.832
+[sim_bridge-3]     }
+[sim_bridge-3]   },
+[sim_bridge-3]   "note": "ROS2 bridge closed-loop; success = gym-aloha reward>=4"
+[sim_bridge-3] }
+[INFO] [sim_bridge-3]: process has finished cleanly [pid 48]
+[INFO] [launch]: process[sim_bridge-3] was required: shutting down launched system
+[INFO] [event_recorder-2]: sending signal 'SIGINT' to process[event_recorder-2]
+[INFO] [async_client-1]: sending signal 'SIGINT' to process[async_client-1]
+[async_client-1] [INFO] [1784404632.066173065] [rclcpp]: signal_handler(SIGINT/SIGTERM)
+[INFO] [async_client-1]: process has finished cleanly [pid 46]
+[INFO] [event_recorder-2]: process has finished cleanly [pid 47]

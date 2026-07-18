@@ -30,9 +30,13 @@
 
 #include "policy.grpc.pb.h"
 #include "smolvla_client/algorithm.hpp"
+#include "smolvla_msgs/msg/policy_chunk.hpp"
+#include "smolvla_msgs/msg/policy_request.hpp"
 #include "smolvla_msgs/msg/sim_observation.hpp"
 #include "smolvla_msgs/msg/tick_event.hpp"
 
+using smolvla_msgs::msg::PolicyChunk;
+using smolvla_msgs::msg::PolicyRequest;
 using smolvla_msgs::msg::SimObservation;
 using smolvla_msgs::msg::TickEvent;
 using Clock = std::chrono::steady_clock;
@@ -77,20 +81,50 @@ public:
     epsilon_ = declare_parameter<double>("epsilon", 0.0);
     aggregate_ = declare_parameter<std::string>("aggregate", "new_wins");
     ramp_in_ = static_cast<int>(declare_parameter<int64_t>("ramp_in", 0));
+    transport_ = declare_parameter<std::string>("transport", "grpc");
 
-    auto channel = grpc::CreateChannel(server_, grpc::InsecureChannelCredentials());
-    stub_ = smolvla_edge::Policy::NewStub(channel);
-    smolvla_edge::HealthRequest hreq;
-    smolvla_edge::HealthReply hrep;
-    grpc::ClientContext hctx;
-    hctx.set_deadline(std::chrono::system_clock::now() + std::chrono::seconds(30));
-    auto status = stub_->Health(&hctx, hreq, &hrep);
-    if (!status.ok()) {
-      throw std::runtime_error("policy server unreachable at " + server_ + ": " +
-              status.error_message());
+    if (transport_ == "grpc") {
+      auto channel = grpc::CreateChannel(server_, grpc::InsecureChannelCredentials());
+      stub_ = smolvla_edge::Policy::NewStub(channel);
+      smolvla_edge::HealthRequest hreq;
+      smolvla_edge::HealthReply hrep;
+      grpc::ClientContext hctx;
+      hctx.set_deadline(std::chrono::system_clock::now() + std::chrono::seconds(30));
+      auto status = stub_->Health(&hctx, hreq, &hrep);
+      if (!status.ok()) {
+        throw std::runtime_error("policy server unreachable at " + server_ + ": " +
+                status.error_message());
+      }
+      RCLCPP_INFO(get_logger(), "policy server %s: device=%s precision=%s g=%.2f epsilon=%.3f",
+        server_.c_str(), hrep.device().c_str(), hrep.precision().c_str(), g_, epsilon_);
+    } else if (transport_ == "ros2") {
+      // all-ROS2 policy hop: PolicyRequest/PolicyChunk over DDS (policy_node.py serves)
+      rclcpp::QoS pqos(10);
+      pqos.reliable();
+      req_pub_ = create_publisher<PolicyRequest>("/policy/request", pqos);
+      chunk_sub_ = create_subscription<PolicyChunk>(
+        "/policy/chunk", pqos, [this](PolicyChunk::UniquePtr msg) {
+          {
+            std::lock_guard<std::mutex> lk(mtx_);
+            ros2_reply_ = *msg;
+          }
+          cv_.notify_all();
+        });
+      // reliable QoS only guarantees delivery to MATCHED endpoints: block until the policy
+      // node is discovered, or the first trigger's request would vanish (pending_ deadlock)
+      const auto t0 = Clock::now();
+      while (rclcpp::ok() &&
+        (req_pub_->get_subscription_count() == 0 || chunk_sub_->get_publisher_count() == 0))
+      {
+        if (Clock::now() - t0 > std::chrono::seconds(60)) {
+          throw std::runtime_error("ros2 policy node not discovered on /policy/* within 60s");
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+      }
+      RCLCPP_INFO(get_logger(), "ros2 policy node discovered: g=%.2f epsilon=%.3f", g_, epsilon_);
+    } else {
+      throw std::runtime_error("unknown transport: " + transport_);
     }
-    RCLCPP_INFO(get_logger(), "policy server %s: device=%s precision=%s g=%.2f epsilon=%.3f",
-      server_.c_str(), hrep.device().c_str(), hrep.precision().c_str(), g_, epsilon_);
 
     rclcpp::QoS qos(1);
     qos.reliable();
@@ -204,7 +238,7 @@ private:
     last_sent_state_ = joint_state(msg);
     {
       std::lock_guard<std::mutex> lk(mtx_);
-      request_ = std::make_pair(epoch_, to_proto(msg, task_));
+      request_ = std::make_pair(epoch_, msg);  // transport-specific encoding in the worker
     }
     cv_.notify_one();
     ev.sent = true;
@@ -260,7 +294,7 @@ private:
   void worker_loop()
   {
     while (true) {
-      std::pair<int64_t, smolvla_edge::Observation> req;
+      std::pair<int64_t, SimObservation> req;
       {
         std::unique_lock<std::mutex> lk(mtx_);
         cv_.wait(lk, [this] {return stop_ || request_.has_value();});
@@ -269,21 +303,46 @@ private:
         request_.reset();
       }
       const auto t0 = Clock::now();
-      smolvla_edge::ActionChunk reply;
-      grpc::ClientContext ctx;
-      auto status = stub_->PredictChunk(&ctx, req.second, &reply);
-      const double secs = std::chrono::duration<double>(Clock::now() - t0).count();
-      if (!status.ok()) {
-        RCLCPP_ERROR(get_logger(), "PredictChunk failed: %s", status.error_message().c_str());
-        continue;  // pending_ stays set; the empty-queue path will not re-trigger — but a
-                   // failed RPC is fatal for the episode anyway and shows up as idle ticks
-      }
       Result res;
       res.epoch = req.first;
-      res.chunk.rows = reply.shape(0);
-      res.chunk.dim = reply.shape(1);
-      res.chunk.data.assign(reply.data().begin(), reply.data().end());
-      res.secs = secs;
+      if (transport_ == "grpc") {
+        smolvla_edge::ActionChunk reply;
+        grpc::ClientContext ctx;
+        auto status = stub_->PredictChunk(&ctx, to_proto(req.second, task_), &reply);
+        if (!status.ok()) {
+          RCLCPP_ERROR(get_logger(), "PredictChunk failed: %s",
+            status.error_message().c_str());
+          continue;  // pending_ stays set; a failed RPC is fatal for the episode anyway
+        }
+        res.chunk.rows = reply.shape(0);
+        res.chunk.dim = reply.shape(1);
+        res.chunk.data.assign(reply.data().begin(), reply.data().end());
+      } else {
+        PolicyRequest preq;
+        preq.request_id = ++ros2_req_id_;
+        preq.task = task_;
+        preq.image_top = req.second.image_top;
+        preq.agent_pos = req.second.agent_pos;
+        preq.client_send_ts =
+          std::chrono::duration<double>(std::chrono::system_clock::now().time_since_epoch())
+          .count();
+        req_pub_->publish(preq);
+        std::unique_lock<std::mutex> lk(mtx_);
+        const bool ok = cv_.wait_for(lk, std::chrono::seconds(60), [this] {
+            return stop_ || (ros2_reply_ && ros2_reply_->request_id == ros2_req_id_);
+          });
+        if (stop_) {return;}
+        if (!ok || !ros2_reply_) {
+          RCLCPP_ERROR(get_logger(), "ros2 PredictChunk timed out (request %ld)",
+            static_cast<long>(ros2_req_id_));
+          continue;
+        }
+        res.chunk.rows = ros2_reply_->rows;
+        res.chunk.dim = ros2_reply_->cols;
+        res.chunk.data.assign(ros2_reply_->data.begin(), ros2_reply_->data.end());
+        ros2_reply_.reset();
+      }
+      res.secs = std::chrono::duration<double>(Clock::now() - t0).count();
       {
         std::lock_guard<std::mutex> lk(mtx_);
         result_ = std::move(res);
@@ -292,7 +351,7 @@ private:
   }
 
   // parameters
-  std::string server_, task_, aggregate_;
+  std::string server_, task_, aggregate_, transport_;
   double g_{0.7}, epsilon_{0.0};
   int ramp_in_{0};
 
@@ -311,8 +370,12 @@ private:
   std::mutex mtx_;
   std::condition_variable cv_;
   bool stop_{false};
-  std::optional<std::pair<int64_t, smolvla_edge::Observation>> request_;
+  std::optional<std::pair<int64_t, SimObservation>> request_;
   std::optional<Result> result_;
+  int64_t ros2_req_id_{0};
+  std::optional<PolicyChunk> ros2_reply_;
+  rclcpp::Publisher<PolicyRequest>::SharedPtr req_pub_;
+  rclcpp::Subscription<PolicyChunk>::SharedPtr chunk_sub_;
 
   rclcpp::Publisher<std_msgs::msg::Float32MultiArray>::SharedPtr action_pub_;
   rclcpp::Publisher<TickEvent>::SharedPtr event_pub_;

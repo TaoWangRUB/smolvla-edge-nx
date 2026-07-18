@@ -14,6 +14,7 @@ from launch_ros.actions import Node
 ARGS = [
     ("sim_server", "sim-server:50052"),
     ("policy_server", "policy-server:50051"),
+    ("transport", "grpc"),
     ("task", ""),
     ("g", "0.7"),
     ("epsilon", "0.0"),
@@ -40,7 +41,7 @@ def generate_launch_description() -> LaunchDescription:
             parameters=[{
                 "server": cfg["policy_server"], "task": cfg["task"], "g": cfg["g"],
                 "epsilon": cfg["epsilon"], "aggregate": cfg["aggregate"],
-                "ramp_in": cfg["ramp_in"],
+                "ramp_in": cfg["ramp_in"], "transport": cfg["transport"],
             }],
         ),
         Node(

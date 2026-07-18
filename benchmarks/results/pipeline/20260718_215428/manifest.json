@@ -1,0 +1,13 @@
+{
+  "checkpoint": "outputs/train/smolvla_transfer_cube/checkpoints/020000",
+  "checkpoint_sha16": "da6e92aa7d699cce",
+  "onnx": "models/onnx/smolvla_transfer_cube.onnx",
+  "onnx_sha16_head": "e7f49c7fc28d2a6c",
+  "gates": {
+    "closed-loop": "PASS",
+    "parity": "PASS",
+    "export": "REUSED",
+    "graph-smoke": "PASS",
+    "collate": "PASS"
+  }
+}

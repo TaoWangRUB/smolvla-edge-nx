@@ -1,0 +1,78 @@
+{
+  "onnx": "models/onnx/smolvla_transfer_cube.onnx",
+  "onnx_sha256_16": "16a59f889a064e1b",
+  "checkpoint": "outputs/train/smolvla_transfer_cube/checkpoints/020000",
+  "task": "Pick up the cube with the right arm and transfer it to the left arm.",
+  "observations": 5,
+  "tolerances": {
+    "max_abs_diff": 0.0001,
+    "min_cosine": 0.9999
+  },
+  "worst_max_abs_diff": 0.1815319061279297,
+  "worst_cosine": 0.9977743029594421,
+  "passed": false,
+  "failures": [
+    {
+      "obs": 0,
+      "max_abs_diff": 0.047377943992614746,
+      "cosine": 0.9998854398727417,
+      "pass": false
+    },
+    {
+      "obs": 1,
+      "max_abs_diff": 0.052911728620529175,
+      "cosine": 0.9996922612190247,
+      "pass": false
+    },
+    {
+      "obs": 2,
+      "max_abs_diff": 0.1815319061279297,
+      "cosine": 0.9979920387268066,
+      "pass": false
+    },
+    {
+      "obs": 3,
+      "max_abs_diff": 0.1573808789253235,
+      "cosine": 0.9977743029594421,
+      "pass": false
+    },
+    {
+      "obs": 4,
+      "max_abs_diff": 0.12505382299423218,
+      "cosine": 0.998631477355957,
+      "pass": false
+    }
+  ],
+  "per_obs": [
+    {
+      "obs": 0,
+      "max_abs_diff": 0.047377943992614746,
+      "cosine": 0.9998854398727417,
+      "pass": false
+    },
+    {
+      "obs": 1,
+      "max_abs_diff": 0.052911728620529175,
+      "cosine": 0.9996922612190247,
+      "pass": false
+    },
+    {
+      "obs": 2,
+      "max_abs_diff": 0.1815319061279297,
+      "cosine": 0.9979920387268066,
+      "pass": false
+    },
+    {
+      "obs": 3,
+      "max_abs_diff": 0.1573808789253235,
+      "cosine": 0.9977743029594421,
+      "pass": false
+    },
+    {
+      "obs": 4,
+      "max_abs_diff": 0.12505382299423218,
+      "cosine": 0.998631477355957,
+      "pass": false
+    }
+  ]
+}

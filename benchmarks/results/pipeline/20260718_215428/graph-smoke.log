@@ -1,0 +1,15 @@
+time="2026-07-18T21:55:30+02:00" level=warning msg="/home/taowang/workspace/smolvla-edge-nx/docker-compose.yml: the attribute `version` is obsolete, it will be ignored, please remove it to avoid potential confusion"
+`torch_dtype` is deprecated! Use `dtype` instead!
+Loading  HuggingFaceTB/SmolVLM2-500M-Video-Instruct weights ...
+Reducing the number of VLM layers to 16 ...
+Loading weights from local directory
+[load_policy] loaded 'outputs/train/smolvla_transfer_cube/checkpoints/020000/pretrained_model' as policy type 'smolvla'
+[async] chunk predictor: saved processor pipeline
+eager fp16 e2e: p50=216ms min=215ms
+[async] chunk predictor: saved processor pipeline
+[cuda-graph] captured full sample_actions; replay parity diff=0.00e+00
+[cuda-graph] lazy capture complete — replay path active
+first call (incl. capture): 1.5s
+fp16-graph e2e: p50=208ms min=207ms
+chunks valid=True input-sensitive std=0.0361
+SUMMARY: eager=216ms -> fp16-graph=208ms  PASS

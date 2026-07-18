@@ -1,4 +1,5 @@
 tag,device,precision,chunking,steps_measured,latency_mean_ms,latency_p50_ms,latency_p95_ms,rtt_mean_ms,rtt_p95_ms,server_compute_mean_ms,network_overhead_mean_ms,throughput_hz,action_chunk_hz,success,ticks_to_success,peak_gpu_mem_mb
+allros2-nx-humble-policy-10ep,xavier-nx-server,fp16-graph,on,10,,,,,,,,,,8/10 = 80%,,
 local-2000ada-act-fp16,cuda,fp16,on,100,0.693,,0.869,,,,,1443.872,,,,271.8
 local-2000ada-act-fp32,cuda,fp32,on,100,0.679,,0.713,,,,,1473.82,,,,266.2
 local-2000ada-smolvla-bf16,cuda,bf16,on,100,28.041,,8.856,,,,,35.662,,,,928.8
@@ -11,3 +12,6 @@ nx-ort-cuda-fp32-chunk,xavier-nx,fp32,on,20,610,,,,,,,82.0,1.64,,,1800
 nx-served-async-g05-rampin5,xavier-nx-server,fp16-graph,on,10,,,,249,,236,12,200.0,4.0,7/10 = 70%,259,
 nx-served-remote-chunk,xavier-nx-server,fp16-graph,on,5,,,,254,,240,16,196.9,3.94,,,
 nx-served-sync-g0,xavier-nx-server,fp16-graph,on,10,,,,249,,236,12,200.0,4.0,7/10 = 70%,329,
+ros2-cppserver-ort-cuda-50ep,cuda,fp32,on,50,,,,1000,,,,,,11/50 = 22%,,
+ros2-pyserver-fp16graph-50ep,cuda,fp16-graph,on,50,,,,,,,,,,36/50 = 72%,,
+ros2-pyserver-fp32-50ep,cuda,fp32,on,50,,,,229,,,,25.0,,40/50 = 80%,,

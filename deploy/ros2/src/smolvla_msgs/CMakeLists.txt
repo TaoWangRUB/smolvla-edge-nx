@@ -9,6 +9,8 @@ find_package(std_msgs REQUIRED)
 rosidl_generate_interfaces(${PROJECT_NAME}
   "msg/SimObservation.msg"
   "msg/TickEvent.msg"
+  "msg/PolicyRequest.msg"
+  "msg/PolicyChunk.msg"
   DEPENDENCIES sensor_msgs std_msgs
 )
 

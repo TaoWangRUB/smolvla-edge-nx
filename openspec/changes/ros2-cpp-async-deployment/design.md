@@ -230,9 +230,26 @@ because stage ordering + fail-fast + run-stamped artifact dirs read clearer in o
 
 ## Open Questions
 
-- FP16 export: quality loss on flow-matching action heads is usually negligible but must be
-  measured — gate on closed-loop success, not just tensor diffs.
-- TensorRT EP vs native TRT engine + C++ runner: EP is less code; revisit only if EP performance
-  disappoints.
+- ~~FP16 export~~ — resolved by supersession: the native fp16 + manual CUDA-Graph serving path
+  (bitwise-identical actions, 2.6× faster than the fp32 ONNX baseline) closed the question; an
+  fp16 re-export can no longer win on speed or accuracy risk (tasks 4.4, 5.5).
+- ~~TensorRT EP vs native TRT engine~~ — resolved: TRT's parser rejects the dynamo graph (op-compat
+  chain, task 5.6); both TRT routes are dead for this export. Runtime-level fusion lost to
+  recording the framework's own kernel stream.
 - Whether `SimEnv` should also serve rendered frames for the demo GIF pipeline or keep that in
   the existing `eval.py` path (leaning: keep in `eval.py`, out of scope here).
+
+## Deferred / future work (task 7.3)
+
+- **Xavier NX ROS2 build — now landed** (2026-07-18): `docker/jetson_ros2_humble.Dockerfile`
+  overlays ROS 2 Humble on the from-source JP5 torch image (Ubuntu 22.04/py3.10 = Humble's exact
+  tier), and `deploy/ros2/policy_node.py` serves the fp16-graph predictor over DDS
+  (`/policy/request` → `/policy/chunk`); `async_client` gained `transport:=ros2`. The remaining
+  rover step is pointing `/observation` at a real camera driver instead of the sim bridge.
+- **Cross-distro DDS** (Humble policy node ↔ Jazzy client): works via matching .msg definitions
+  built on both sides; type-hash is absent on Humble and tolerated by Jazzy. Re-verify whenever
+  either distro is upgraded.
+- **JPEG on the wire** (image_transport) for the 900 KiB `/observation` frame — worthwhile once
+  the loop leaves a single host/direct link.
+- **Event-driven bridge step** (drop the fixed 50 Hz wall timer): ~35 Hz for free (task 3.9 finding).
+- **Isaac Lab-Arena option** with the IsaacLab-SO101 community checkpoints — unexplored.

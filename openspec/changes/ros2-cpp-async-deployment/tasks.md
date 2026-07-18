@@ -109,9 +109,11 @@
       exit code** (max-abs-diff ≤ 1e-4 AND cosine ≥ 0.9999, non-zero on fail). **PASS: worst
       max-abs-diff 4.29e-6, worst cosine 0.99999988** over 100 obs →
       `benchmarks/results/onnx_parity.json` (with checkpoint + onnx sha).
-- [ ] 4.4 (Optional after FP32 parity) FP16 variant; gate on closed-loop success, not tensor
-      diffs — **deferred**: closed-loop gating needs the serving path (Stage 2b) to run the graph
-      in the loop; revisit once cpp-server (or a Python ORT-backed server) lands.
+- [x] 4.4 (Optional after FP32 parity) FP16 ONNX variant — **closed as superseded**: the native
+      fp16 + manual CUDA-Graph path (`precision="fp16-graph"`, smolvla-edge-deployment §6.2b) is
+      2.6× faster than the fp32 ONNX baseline with **bitwise-identical** actions and passed the
+      closed-loop gate (see 5.5 rerun below); an ONNX-fp16 re-export can no longer beat it on
+      either speed or accuracy risk.
 
 ## 5. Stage 2b — C++ inference server (cpp-inference-server)
 
@@ -130,7 +132,13 @@
       Python server) + `CPP_PROVIDER`/`ONNX_MODEL` env; A/B is which server you start.
 - [x] 5.4 **Wire-compat PASS:** the Python reference client and the **ROS2 `async_client` run
       unmodified** against the C++ server (valid [50,14] chunks, Health cuda/fp32).
-- [~] 5.5 **Stage 2 gate: FAILS on this GPU, for a characterized latency reason (not a
+- [x] 5.5 **Stage 2 gate: PASSED via the fp16-graph server** (the C++ ORT attempt below remains
+      the recorded negative result). Rerun of the identical 50-ep protocol (seeds 0-49, g=0.5,
+      ramp_in 5, fs3) against `policy-server --precision fp16-graph` (CUDA-graph capture, 53 ms
+      exclusive on the A2000): **36/50 = 72%, idle 0.0** — inside the binomial band of the 74-80%
+      references and far above the ORT-CUDA server's 22%. Artifacts:
+      `benchmarks/results/ros2/stage2_fp16graph_50ep{.json,_events.jsonl}`. Original ORT finding
+      (kept for the writeup): **FAILS on this GPU, for a characterized latency reason (not a
       correctness bug).** ROS2 stack -> C++ server, 50 ep: **11/50 = 22 %, idle 64.7/ep** vs the
       80 % Python-server baseline. Root cause: ORT CUDA EP inference of the 500 M-param SmolVLM2
       VLM is **~1.0 s/chunk** on the RTX A2000 Laptop (GPU pinned ~1 GHz/20 W at 100 % util under
@@ -139,7 +147,11 @@
       failure. The graph itself is correct (parity 4e-6) and wire-compatible; the gate would pass
       on a workstation-class GPU (design's Titan X tier). Artifact:
       `benchmarks/results/ros2/stage2_cpp_50ep.json`. Remedy under evaluation: **5.6 TensorRT EP**.
-- [~] 5.6 **Latency root-cause investigated (the 5.5 wall).** ORT node profiling: 97% CUDA, the
+- [x] 5.6 **Latency root-cause investigated (the 5.5 wall) — closed: superseded by manual CUDA-graph
+      capture in native torch** (smolvla-edge-deployment 6.2b), which attacks the same
+      launch/fusion economics from the torch side and won (bitwise-exact, 2.6×; the ORT graph
+      remains kernel-execution-bound and TRT still can't parse it — no longer worth pursuing).
+      Original investigation record: ORT node profiling: 97% CUDA, the
       TorchDynamo graph is 30852 tiny nodes. Tried, in order: ORT graph-opt (30852→4920, no RTT
       change — ORT does it online); `transformers.optimizer` (544 ms, −22%); a **RoPE patch**
       (`deploy/onnx/onnx_patches.py`: `apply_rope` split→slice + in-place→cat) that removes ALL
@@ -168,20 +180,34 @@
 
 ## 6. Pipeline automation (deployment-pipeline)
 
-- [ ] 6.1 `scripts/deploy_pipeline.sh <checkpoint>`: chain export → parity → cpp-server image
-      build → closed-loop regression → benchmark rows via `docker compose run`, fail-fast with
-      the failing gate named
-- [ ] 6.2 Run-stamped artifact dirs under `benchmarks/results/pipeline/<ts>/` with a manifest
-      (checkpoint/export/image hashes, per-gate status)
-- [ ] 6.3 Green-run the pipeline on the fine-tuned checkpoint; force a parity failure to
-      demonstrate fail-fast; commit both manifests as provenance examples
+- [x] 6.1 `scripts/deploy_pipeline.sh <checkpoint>` — **done**, gates: export (REUSE_ONNX=1 skips a
+      deterministic re-export) → enforced parity → **fp16-graph capture smoke** (the shipped serving
+      path; replaces the superseded cpp-server build gate) → ROS2 closed-loop regression (≥60%
+      success) → collate; fail-fast with the failing gate named
+- [x] 6.2 Run-stamped artifact dirs under `benchmarks/results/pipeline/<ts>/` with `manifest.json`
+      (checkpoint + onnx sha16, per-gate status) + per-gate logs — done
+- [x] 6.3 **Green run PASS** (20260718_215428: parity PASS, graph-smoke PASS, closed-loop 4/5 = 80%,
+      collate PASS) and **forced failure demonstrated** (20260718_215843: `PARITY_FLOW_STEPS=10`
+      breaks the torch reference vs the fs3 graph → parity FAIL → pipeline stops, manifest records
+      the failing gate). Both manifests committed as provenance examples
 
 ## 7. Benchmarks + docs
 
-- [ ] 7.1 Add ROS2+py-server and ROS2+cpp-server (CUDA EP, and TRT EP if done) rows to the
-      benchmark table: PredictChunk RTT, per-tick jitter percentiles, VRAM per service — with
-      measured provenance per repo convention
-- [ ] 7.2 README: ROS2 quickstart (compose commands, profiles), pipeline usage, architecture
-      diagram, honest Python-vs-C++ result discussion
-- [ ] 7.3 Record deferred items (Xavier NX ROS2 build, Isaac Lab-Arena option with the
-      IsaacLab-SO101 community checkpoints) in the change's design Open Questions / future work
+- [x] 7.1 Benchmark rows — **done, in `summary.csv` (16 tiers)**: ROS2+py-server fp32 (80%, RTT
+      229 ms, 25 Hz tick), ROS2+cpp-server ORT-CUDA (22%, ~1.0 s — recorded negative),
+      ROS2+py-server **fp16-graph** (72% Stage-2 gate), and the **all-ROS2 NX tier** (below)
+- [x] 7.2 README ROS2 chapter — **done**: quickstart/compose commands + tick decomposition were
+      already in; added Stage-2b honest C++ ORT negative + how the gate passed (fp16-graph),
+      pipeline usage, and the **all-ROS2 section** (see 7.4)
+- [x] 7.3 Deferred items recorded in design.md ("Deferred / future work"): resolved open
+      questions (fp16 export, TRT — both superseded), JPEG-on-the-wire, event-driven bridge
+      step, Isaac Lab-Arena option
+- [x] 7.4 **All-ROS2 policy hop (client AND server on ROS 2) — built and measured.**
+      `docker/jetson_ros2_humble.Dockerfile` overlays ROS 2 Humble on the JP5 torch image
+      (22.04/py3.10 = Humble's tier); `deploy/ros2/policy_node.py` serves the fp16-graph
+      predictor as an rclpy node ON the Xavier NX (`/policy/request`→`/policy/chunk`);
+      `async_client` grew `transport:=ros2` (gRPC default unchanged); new msgs
+      PolicyRequest/PolicyChunk built on both distros. Cross-host cross-distro DDS
+      (Humble↔Jazzy) discovered out of the box. **Closed loop 10 eps: 8/10 = 80%**, ep0 idle
+      414 = one-time lazy CUDA-graph capture (pre-warm to remove), steady-state idle 9–17/ep.
+      Artifacts: `benchmarks/results/ros2/allros2_nx_10ep{.json,_events.jsonl}`

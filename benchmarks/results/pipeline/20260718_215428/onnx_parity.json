@@ -1,0 +1,137 @@
+{
+  "onnx": "models/onnx/smolvla_transfer_cube.onnx",
+  "onnx_sha256_16": "16a59f889a064e1b",
+  "checkpoint": "outputs/train/smolvla_transfer_cube/checkpoints/020000",
+  "task": "Pick up the cube with the right arm and transfer it to the left arm.",
+  "observations": 20,
+  "tolerances": {
+    "max_abs_diff": 0.0001,
+    "min_cosine": 0.9999
+  },
+  "worst_max_abs_diff": 4.0531158447265625e-06,
+  "worst_cosine": 0.9999998807907104,
+  "passed": true,
+  "failures": [],
+  "per_obs": [
+    {
+      "obs": 0,
+      "max_abs_diff": 4.0531158447265625e-06,
+      "cosine": 1.0,
+      "pass": true
+    },
+    {
+      "obs": 1,
+      "max_abs_diff": 1.0281801223754883e-06,
+      "cosine": 1.0000001192092896,
+      "pass": true
+    },
+    {
+      "obs": 2,
+      "max_abs_diff": 2.115964889526367e-06,
+      "cosine": 1.0,
+      "pass": true
+    },
+    {
+      "obs": 3,
+      "max_abs_diff": 9.238719940185547e-07,
+      "cosine": 0.9999999403953552,
+      "pass": true
+    },
+    {
+      "obs": 4,
+      "max_abs_diff": 1.1324882507324219e-06,
+      "cosine": 1.0000001192092896,
+      "pass": true
+    },
+    {
+      "obs": 5,
+      "max_abs_diff": 6.556510925292969e-07,
+      "cosine": 1.0,
+      "pass": true
+    },
+    {
+      "obs": 6,
+      "max_abs_diff": 6.556510925292969e-07,
+      "cosine": 1.0,
+      "pass": true
+    },
+    {
+      "obs": 7,
+      "max_abs_diff": 4.76837158203125e-07,
+      "cosine": 1.0,
+      "pass": true
+    },
+    {
+      "obs": 8,
+      "max_abs_diff": 7.748603820800781e-07,
+      "cosine": 1.0,
+      "pass": true
+    },
+    {
+      "obs": 9,
+      "max_abs_diff": 6.556510925292969e-07,
+      "cosine": 0.9999998807907104,
+      "pass": true
+    },
+    {
+      "obs": 10,
+      "max_abs_diff": 6.556510925292969e-07,
+      "cosine": 1.0000001192092896,
+      "pass": true
+    },
+    {
+      "obs": 11,
+      "max_abs_diff": 3.5762786865234375e-07,
+      "cosine": 1.0,
+      "pass": true
+    },
+    {
+      "obs": 12,
+      "max_abs_diff": 2.980232238769531e-07,
+      "cosine": 1.0,
+      "pass": true
+    },
+    {
+      "obs": 13,
+      "max_abs_diff": 6.556510925292969e-07,
+      "cosine": 1.0,
+      "pass": true
+    },
+    {
+      "obs": 14,
+      "max_abs_diff": 4.76837158203125e-07,
+      "cosine": 0.9999998807907104,
+      "pass": true
+    },
+    {
+      "obs": 15,
+      "max_abs_diff": 4.76837158203125e-07,
+      "cosine": 0.9999998807907104,
+      "pass": true
+    },
+    {
+      "obs": 16,
+      "max_abs_diff": 4.76837158203125e-07,
+      "cosine": 1.0,
+      "pass": true
+    },
+    {
+      "obs": 17,
+      "max_abs_diff": 5.364418029785156e-07,
+      "cosine": 0.9999998807907104,
+      "pass": true
+    },
+    {
+      "obs": 18,
+      "max_abs_diff": 4.76837158203125e-07,
+      "cosine": 1.0,
+      "pass": true
+    },
+    {
+      "obs": 19,
+      "max_abs_diff": 5.364418029785156e-07,
+      "cosine": 1.0000001192092896,
+      "pass": true
+    }
+  ]
+}
