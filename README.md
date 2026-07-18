@@ -11,10 +11,12 @@ part most tutorials skip.
 
 No robot arm required: SmolVLA fine-tunes from public Hugging Face datasets, and evaluation
 runs **closed-loop in the gym-aloha MuJoCo simulator** (plus open-loop replay as a fallback).
-The Xavier NX edge phase is live — the fine-tuned SmolVLA runs on-device on a Jetson Xavier NX
-(8 GB) at **233 ms/chunk** (native from-source PyTorch, fp16 + full-forward CUDA Graph capture,
-bitwise-identical actions); the pure-Python ONNX Runtime GPU fallback path runs ~610 ms/chunk.
-See the deployment section.
+The Xavier NX edge phase is complete — the fine-tuned SmolVLA runs on-device on a Jetson Xavier
+NX (8 GB) at **233 ms/chunk** (native from-source PyTorch, fp16 + full-forward CUDA Graph
+capture, bitwise-identical actions); the pure-Python ONNX Runtime GPU fallback path runs
+~610 ms/chunk. The closed loop was measured with the NX serving over both gRPC (async 70%,
+zero idle) and a fully **ROS 2** policy hop (Humble rclpy node on the NX ↔ Jazzy C++ client
+over DDS, 80%) — the rover's end-state architecture. See the deployment sections.
 
 ---
 
@@ -111,8 +113,8 @@ edge deployment and latency engineering.
 
 ## Roadmap
 
-Progress: **38 / 38 tasks — complete** — details in
-[the change tasks](openspec/changes/smolvla-edge-deployment/tasks.md).
+Progress: **complete** — [smolvla-edge-deployment](openspec/changes/smolvla-edge-deployment/tasks.md)
+38/38 tasks, [ros2-cpp-async-deployment](openspec/changes/ros2-cpp-async-deployment/tasks.md) 34/34 tasks.
 
 **Headline result — the head-to-head is in: the fine-tuned SmolVLA wins.** On
 `AlohaTransferCube-v0`, identical 20-episode protocol, matched simulator:
