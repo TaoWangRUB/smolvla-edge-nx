@@ -11,8 +11,10 @@ part most tutorials skip.
 
 No robot arm required: SmolVLA fine-tunes from public Hugging Face datasets, and evaluation
 runs **closed-loop in the gym-aloha MuJoCo simulator** (plus open-loop replay as a fallback).
-The Xavier NX edge phase is live — the fine-tuned SmolVLA already runs on-device on a Jetson
-Xavier NX (8 GB) via pure-Python ONNX Runtime GPU (~610 ms/chunk); see the deployment section.
+The Xavier NX edge phase is live — the fine-tuned SmolVLA runs on-device on a Jetson Xavier NX
+(8 GB) at **233 ms/chunk** (native from-source PyTorch, fp16 + full-forward CUDA Graph capture,
+bitwise-identical actions); the pure-Python ONNX Runtime GPU fallback path runs ~610 ms/chunk.
+See the deployment section.
 
 ---
 
@@ -96,9 +98,11 @@ edge deployment and latency engineering.
   `lerobot/aloha_sim_insertion_human`, evaluate **closed-loop** with the env's own success flag.
   The real SO-101 path (`configs/train.so101_pickplace.yaml`) is kept for when hardware exists.
 - **Jetson Xavier NX edge deployment (Phase 2, now live).** A Jetson Xavier NX (8 GB) is on hand:
-  the fine-tuned SmolVLA runs on-device via pure-Python ONNX Runtime GPU (~610 ms/chunk, fp32) —
-  see [On-device on the Xavier NX](#on-device-on-the-xavier-nx--first-measured-number). FP16, the
-  on-device async stack, and INT8/TensorRT remain.
+  the fine-tuned SmolVLA runs on-device at **233 ms/chunk** via native from-source PyTorch with
+  fp16 + manual CUDA Graph capture (2.6× over eager, bitwise-identical actions); the pure-Python
+  ONNX Runtime GPU path (~610 ms/chunk, fp32) is the torch-free fallback — see
+  [On-device on the Xavier NX](#on-device-on-the-xavier-nx--first-measured-number). The on-device
+  async stack remains.
 - **Future work — mobile rover.** A rover is a different embodiment (mobile base, not an arm).
   Adapting SmolVLA to it is a research project, not a two-week demo. See the *Non-Goals* in
   [the change design](openspec/changes/smolvla-edge-deployment/design.md).
@@ -107,7 +111,7 @@ edge deployment and latency engineering.
 
 ## Roadmap
 
-Progress: **19 / 27 tasks** — details in
+Progress: **30 / 38 tasks** — details in
 [the change tasks](openspec/changes/smolvla-edge-deployment/tasks.md).
 
 **Headline result — the head-to-head is in: the fine-tuned SmolVLA wins.** On
@@ -122,7 +126,7 @@ gap (36 Hz ceiling vs the 50 Hz control loop) is exactly what the edge phase exi
 |-------|------|--------|-------|
 | 0 | **Scaffold + environment** — repo, pins, host env, **Docker env** | ✅ 6/6 | matched-mujoco container built & verified |
 | 1 | **Correctness (sim)** — verify-first, fine-tune SmolVLA, closed-loop eval | ✅ 6/6 | **Deliverable: fine-tuned SmolVLA 70 % success** (transfer cube, 20 eps, matched mujoco) vs official ACT baseline **65 %** on identical seeds; trained 20k steps on Colab A100 |
-| 2 | **Edge deployment** — Xavier NX on-device + client/server | 🔄 1/7 | **Jetson Xavier NX (8 GB) now on hand** — the fine-tuned SmolVLA runs on-device via **pure-Python ONNX Runtime GPU**: ~610 ms/chunk (CUDA EP, fp32, 20 W/6-core). FP16, on-device async, and INT8/TensorRT still pending |
+| 2 | **Edge deployment** — Xavier NX on-device + client/server | 🔄 3/8 | **On-device solved: 233 ms/chunk** — native from-source torch 2.2.2 (JP5 "impossible" build), fp16 + **manual CUDA Graph capture of the full forward** (608 → 233 ms, bitwise-exact). Torch-free fallback: pure-Python ORT GPU ~610 ms (CUDA EP, fp32). On-device async still pending |
 | 3 | **Benchmarks + writeup** — latency table + demo GIF + narrative | 🔄 3/5 | ✅ demo GIFs (fine-tuned SmolVLA + ACT baseline, latency overlays), collate, narrative through Phase 1; NX benchmark tiers now unblocked (first on-device number below) |
 
 **Measured so far** (evaluated on RTX 2000 Ada, matched-mujoco container; SmolVLA trained on a Colab A100):
@@ -282,6 +286,36 @@ The Stage-2a monolithic export bakes the instruction tokens and all normalizatio
 
 ~2× the dev-box latency, as expected for the edge — and still under the 1 s a 50-action chunk
 buys at 50 Hz, so with async decoupling ([§ async inference](#asynchronous-inference--the-papers-algorithm-1-reproduced-in-sim)) the GPU keeps up on average.
+
+### On-device, solved: 233 ms/chunk via native torch + CUDA Graph capture
+
+The second (and winning) on-device path builds the "impossible" native stack from source —
+**PyTorch 2.2.2 (cp310, CUDA 11.8, sm_72) + LeRobot on JetPack 5** — and then fixes the real
+bottleneck. Profiling showed eager fp16 (~630 ms) is **launch-bound**: the GPU sits ~80% idle
+(tegrastats GR3D 15–26%) while the weak Carmel CPU dispatches thousands of small kernels. That
+diagnosis dictated the classical cure — **record-once-replay** — and ruled out everything that
+only shrinks per-op compute (256M backbone: 591 ms, no help; INT8: same category; full-model
+TensorRT: builder OOM on 8 GB).
+
+`torch.compile(backend="cudagraphs")` gave only ~4% (dynamo breaks on the flow-matching loop),
+but **manual `torch.cuda.CUDAGraph` capture** of the raw kernel stream works — the workload is
+static-shape (fixed camera resolution, padded task tokens, 3 flow steps, injectable noise), so
+the **entire forward** (SigLIP encoder + 16-layer VLM prefix + 3 denoise steps) captures as one
+graph after neutralizing three constant H2D copies (details + harness:
+[deploy/jetson-native-torch/README.md](deploy/jetson-native-torch/README.md)):
+
+| Xavier NX, fp16, 3 flow steps | latency |
+|---|---|
+| eager end-to-end | 608 ms |
+| graph replay only (zero CPU dispatch) | 211 ms |
+| **graphed end-to-end (preproc + copies + replay + post)** | **233 ms** |
+
+Actions are **bitwise-identical** to eager (max-abs-diff 0.00, cosine 1.000000 — same kernels,
+same order), on both captured and new observations; +0.11 GB memory. The 211 ms floor confirms
+the diagnosis: ~400 ms of the eager wall time was pure CPU dispatch. **The 8 GB Xavier now
+matches the ~230 ms laptop-class target** with no retrain and no quantization — and the rover
+case needs no host offload at all. Self-contained image: `wtlove876/smolvla-jetson:jp5-cu118`
+(Docker Hub).
 
 ```bash
 # on the Jetson (repo at ~/workspace/smolvla-edge-nx). One-time build (buildx-free):
