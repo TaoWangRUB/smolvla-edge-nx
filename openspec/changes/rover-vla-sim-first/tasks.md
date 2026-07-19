@@ -70,8 +70,21 @@ purchase is gated behind M2 (except camera *selection*, which is an M0 task by d
       (0.5 m/s, 1.0 rad/s) command. Clock discipline documented in rover/README.md (single gz
       `/clock`, `use_sim_time` everywhere, header-stamp arithmetic only, `ros2 topic pub`
       wall-stamp warning).
-- [ ] 1.6 Expert stack: privileged A* on the sim map + Pure Pursuit through the Ackermann
+- [x] 1.6 Expert stack: privileged A* on the sim map + Pure Pursuit through the Ackermann
       model; drives sampled start→goal routes with goal-visible-at-start validity check.
+      **DONE 2026-07-19** — `rover/ros2/src/rover_expert/scripts/expert_driver.py`: occupancy
+      grid built from the episode config (prop footprints + per-scene statics, inflated by
+      rover radius + 10 cm; goal prop inflated less so the approach ring stays reachable),
+      8-connected A* (no corner cutting), line-of-sight shortcut smoothing densified to 5 cm,
+      Pure Pursuit at 50 Hz with the measured feasibility clamp |ω| ≤ v/0.341 and near-goal
+      speed ramp; goal-visible-at-start re-checked; per-run clearance monitor; one-line JSON
+      verdict. **Verified 10/10 sampled episodes across all three scene families** (5×
+      open_ground, 3× corridor, 2× parking_lot): all reach the 0.6 m goal ring (final dist
+      0.591–0.597 m), min clearance always positive (tightest 0.094 m beyond the 0.18 m
+      circumscribed rover circle, weaving past parked boxes), routes 1.7–6.4 m in 3.7–14 s at
+      0.5 m/s cruise. Arrival frame confirms the goal prop fills the camera. Known M0
+      limitation (recorded): SCENE_STATICS duplicates the world SDF geometry — unify when
+      worlds become generated (M1).
 - [ ] 1.7 Recorder → **LeRobot format**: RGB 10–15 Hz, GT pose 50 Hz, (speed, yaw rate,
       steering), expert commands, per-episode randomization config + intrinsics + collision/
       success flags. Optional sim depth channel (debug only).
