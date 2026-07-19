@@ -146,10 +146,23 @@ purchase is gated behind M2 (except camera *selection*, which is an M0 task by d
       data, blur augmentation, and the D2-native (chunk_size=K, action_dim=3) shape if a
       custom collate is adopted. Ops notes: `--shm-size=8g` mandatory (64 MB default kills
       dataloader workers); Maxwell cannot bf16 (CUBLAS_STATUS_NOT_SUPPORTED).
-- [ ] 2.5 Tracker node: Pure Pursuit at 50–100 Hz on EKF odometry (sim: GT + noise), hard
+- [x] 2.5 Tracker node: Pure Pursuit at 50–100 Hz on EKF odometry (sim: GT + noise), hard
       limits (max speed, steering rate, min turn radius) enforced.
-- [ ] 2.6 Async policy loop wired (AsyncRunner semantics): chunk replaces queue after
+      **DONE 2026-07-19** — `rover_runtime/tracker_node.py`: 50 Hz PP on waypoint chunks,
+      hard limits v ≤ 0.8 and |ω| ≤ v/0.341 (the measured min-turn-radius clamp), chunk
+      REPLACES path. Unit-verified in an isolated ROS domain: straight chunk → v = 0.500,
+      ω = 0 exactly; watchdog below. *Noted gap: odometry noise injection (GT is used raw in
+      sim for now) — add with the M2 robustness work.*
+- [x] 2.6 Async policy loop wired (AsyncRunner semantics): chunk replaces queue after
       odometry-delta latency compensation; staleness watchdog (age > 1 s ⇒ speed ramp to 0).
+      **DONE 2026-07-19** — `chunk_client_node.py` (sequential request loop, one in flight;
+      latest-frame JPEG + state + instruction over stdlib TCP; publishes `/waypoint_chunk`
+      carrying the original capture_t) + `rover/runtime/policy_server.py` (SmolVLA checkpoint
+      on the Titan X). Latency compensation = tracker transforms the chunk into world frame
+      using pose history at capture_t. Verified: watchdog ramps v to 0 at 2.2 s staleness;
+      server round-trip **~280 ms/inference** (3.6 chunks/s vs 2.5 s horizon ≈ 9× replan
+      overlap — inside D3's envelope). Transport is the D8 client/server lineage; on the NX
+      the chunk source becomes the all-ROS2 policy node with identical topics.
 - [ ] 2.7 Closed-loop rollouts in training-like scenes; measure success rate + swap test.
 - [ ] 2.8 **Exit**: policy reaches visible goals above threshold in training-like scenes; swap
       test above chance. **Escape valve (pre-committed)**: if the swap test fails under the
