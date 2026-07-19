@@ -9,6 +9,7 @@ install(
     scripts/episode_recorder.py
     scripts/run_episode.py
     scripts/replay_episode.py
+    scripts/run_eval.py
   DESTINATION lib/${PROJECT_NAME}
 )
 
