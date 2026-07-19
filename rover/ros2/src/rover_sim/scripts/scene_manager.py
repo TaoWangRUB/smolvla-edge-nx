@@ -151,13 +151,21 @@ def sample(scene: str, seed: int) -> EpisodeConfig:
 # ---------------------------------------------------------------- gz plumbing
 
 def gz_service(world: str, service: str, reqtype: str, req: str,
-               reptype: str = 'gz.msgs.Boolean', timeout_ms: int = 3000):
+               reptype: str = 'gz.msgs.Boolean', timeout_ms: int = 4000,
+               attempts: int = 3):
+    """One gz service call with retries: each CLI invocation does fresh
+    transport discovery, which intermittently exceeds the timeout under
+    batch load (measured ~1/3 of calls failing at 3 s during datagen)."""
     cmd = ['gz', 'service', '-s', f'/world/{world}/{service}',
            '--reqtype', reqtype, '--reptype', reptype,
            '--timeout', str(timeout_ms), '--req', req]
-    out = subprocess.run(cmd, capture_output=True, text=True)
-    ok = out.returncode == 0 and 'data: true' in out.stdout
-    return ok, out.stdout.strip() or out.stderr.strip()
+    msg = ''
+    for _ in range(attempts):
+        out = subprocess.run(cmd, capture_output=True, text=True)
+        if out.returncode == 0 and 'data: true' in out.stdout:
+            return True, out.stdout.strip()
+        msg = out.stdout.strip() or out.stderr.strip()
+    return False, msg
 
 
 def prop_sdf(p: Prop) -> str:
@@ -206,13 +214,15 @@ def spawn_model(world: str, sdf: str):
 
 
 def clear_episode(world: str):
+    # attempts=1: removing an absent entity returns a fast negative — do not
+    # retry those, or the stateless clear costs ~12 s per episode.
     removed = 0
     for name in ['ep_ground'] + [f'ep_prop_{i}' for i in range(MAX_PROPS)]:
         ok, _ = gz_service(world, 'remove', 'gz.msgs.Entity',
-                           f'name: "{name}" type: MODEL')
+                           f'name: "{name}" type: MODEL', attempts=1)
         removed += bool(ok)
     ok, _ = gz_service(world, 'remove', 'gz.msgs.Entity',
-                       'name: "ep_light" type: LIGHT')
+                       'name: "ep_light" type: LIGHT', attempts=1)
     return removed + bool(ok)
 
 
