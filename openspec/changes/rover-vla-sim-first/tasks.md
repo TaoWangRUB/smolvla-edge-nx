@@ -85,9 +85,26 @@ purchase is gated behind M2 (except camera *selection*, which is an M0 task by d
       0.5 m/s cruise. Arrival frame confirms the goal prop fills the camera. Known M0
       limitation (recorded): SCENE_STATICS duplicates the world SDF geometry — unify when
       worlds become generated (M1).
-- [ ] 1.7 Recorder → **LeRobot format**: RGB 10–15 Hz, GT pose 50 Hz, (speed, yaw rate,
+- [x] 1.7 Recorder → **LeRobot format**: RGB 10–15 Hz, GT pose 50 Hz, (speed, yaw rate,
       steering), expert commands, per-episode randomization config + intrinsics + collision/
       success flags. Optional sim depth channel (debug only).
+      **DONE 2026-07-19** — two-stage pipeline. (1) Sim side (`rover_expert`):
+      `episode_recorder.py` logs frames (15.15 Hz measured, native 1280×800 JPEG q90) +
+      `gt_pose`/`state` at exactly 50 Hz + every expert command + camera intrinsics, all
+      sim-time stamped; `run_episode.py` orchestrates scene→record→expert→verdict and writes
+      `episode.json` (config + verdict + success/collision flags) — the 2.3 datagen entry
+      point. (2) `rover/datagen/to_lerobot.py` (runs in the `smolvla-edge:sim` image) converts
+      raw episodes → LeRobotDataset v0.4.4: `observation.image` (video), `observation.state`,
+      `observation.gt_pose`, provisional `action`=[v,ω] (task 2.1 rebuilds actions as K×(x,y,v)
+      chunks from the raw 50 Hz poses, which stay in the episode dirs), task = instruction.
+      Verified loading with `video_backend='pyav'` (repo convention): 2 episodes / 370 frames /
+      fps 15, correct shapes and instruction strings. Corrections/notes: the earlier "4.3 Hz
+      bridge cap" was a `ros2 topic hz` CLI artifact — a real subscriber receives the full
+      15 Hz, so no compression needed at M0 scale; recorder orchestration must signal the
+      recorder's *process group* (`ros2 run` wrapper swallows SIGINT); on hosts without a
+      default route set `GZ_IP=127.0.0.1` or gz-transport discovery fails. Sim depth channel:
+      omitted (optional; add at M2 with the safety-monitor work). Raw episodes + converted
+      dataset live under `rover/data/` (gitignored).
 - [ ] 1.8 **Exit**: one scripted episode replays end-to-end from logged data (actions re-drive
       the sim; waypoint labels reconstruct from logged poses).
 
