@@ -22,11 +22,17 @@ STEPS="${STEPS:-300}"
 OUTPUT_DIR="${OUTPUT_DIR:-rover/outputs/train/smoke_v1}"
 GPU="${GPU:-1}"   # 1 = Titan X (12 GB), 0 = A2000 (4 GB)
 
-docker run --rm --runtime nvidia \
+# --shm-size is mandatory: the default 64 MB /dev/shm kills multi-worker
+# dataloading of 1280x800 frames (worker "exited unexpectedly").
+# The sed patches lerobot's hardcoded bfloat16 VLM load to float32: Maxwell
+# (Titan X, sm_52) has no bf16 — cuBLAS fails with STATUS_NOT_SUPPORTED.
+docker run --rm --runtime nvidia --shm-size=8g \
   -e NVIDIA_VISIBLE_DEVICES=all -e CUDA_VISIBLE_DEVICES="${GPU}" \
   -e HF_HOME=/work/.hf_cache \
   -v "$PWD":/work -w /work \
   smolvla-edge:sim \
+  bash -c "sed -i 's/torch_dtype=\"bfloat16\"/torch_dtype=\"float32\"/' \
+    /opt/conda/lib/python3.11/site-packages/lerobot/policies/smolvla/smolvlm_with_expert.py && \
   lerobot-train \
     --policy.path=lerobot/smolvla_base \
     --policy.push_to_hub=false \
@@ -36,8 +42,8 @@ docker run --rm --runtime nvidia \
     --dataset.root="${ROOT}" \
     --dataset.video_backend=pyav \
     --rename_map='{"observation.image": "observation.images.camera1"}' \
-    --batch_size="${BATCH_SIZE}" \
-    --steps="${STEPS}" \
-    --save_freq="${STEPS}" \
+    --batch_size=${BATCH_SIZE} \
+    --steps=${STEPS} \
+    --save_freq=${STEPS} \
     --log_freq=10 \
-    --output_dir="${OUTPUT_DIR}"
+    --output_dir=${OUTPUT_DIR}"
