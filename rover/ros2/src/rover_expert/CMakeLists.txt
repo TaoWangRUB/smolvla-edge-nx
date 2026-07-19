@@ -8,6 +8,7 @@ install(
     scripts/expert_driver.py
     scripts/episode_recorder.py
     scripts/run_episode.py
+    scripts/replay_episode.py
   DESTINATION lib/${PROJECT_NAME}
 )
 

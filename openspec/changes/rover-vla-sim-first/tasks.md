@@ -105,8 +105,18 @@ purchase is gated behind M2 (except camera *selection*, which is an M0 task by d
       default route set `GZ_IP=127.0.0.1` or gz-transport discovery fails. Sim depth channel:
       omitted (optional; add at M2 with the safety-monitor work). Raw episodes + converted
       dataset live under `rover/data/` (gitignored).
-- [ ] 1.8 **Exit**: one scripted episode replays end-to-end from logged data (actions re-drive
+- [x] 1.8 **Exit**: one scripted episode replays end-to-end from logged data (actions re-drive
       the sim; waypoint labels reconstruct from logged poses).
+      **PASSED 2026-07-19 — M0 COMPLETE.** (a) `replay_episode.py`: scene reset from the
+      logged (scene, seed), 524 logged commands re-published at their sim-time cadence —
+      trajectory reproduces with **final error 0.020 m, max deviation 0.026 m** over the 5.1 m
+      route (physics effectively deterministic under identical command streams). (b)
+      `rover/datagen/relabel.py`: K=12 @ Δt=0.25 s body-frame (x, y, v) chunks from the raw
+      50 Hz poses — straight segments spaced exactly v·Δt, turning frames show lateral
+      progression, episode end clamps to the stop point with v→0; 0 sanity violations across
+      all 181 frames. Hardware note: the Titan X (Maxwell, 12 GB, sm_52) is now attached via
+      eGPU and torch 2.6+cu124 in `smolvla-edge:sim` retains sm_50 kernels — verified matmul;
+      it is the designated *training* GPU (it still cannot render for Isaac Sim).
 
 ## 2. M1 — Pipeline proof (2–4 weeks)
 
