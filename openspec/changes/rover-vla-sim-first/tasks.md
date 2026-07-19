@@ -44,10 +44,32 @@ purchase is gated behind M2 (except camera *selection*, which is an M0 task by d
       tracker's hard-limit clamp (task 2.5) is mandatory, not optional. Two recorder notes:
       derive yaw rate from pose history (the OdometryPublisher `twist` field is unreliable at
       high curvature), and the camera mount pose is provisional until M3 locks the real mount.
-- [ ] 1.4 Build 2–3 initial scenes (parking lot, corridor, open ground with props) with the
+- [x] 1.4 Build 2–3 initial scenes (parking lot, corridor, open ground with props) with the
       randomization hooks (lighting, materials, placement, spawn/goal) wired but minimal.
-- [ ] 1.5 ROS 2 bridge up: /observation (camera + state) out, /cmd (steer, throttle) in;
+      **DONE 2026-07-19** — three structural worlds (`open_ground`, `corridor`, `parking_lot`)
+      + `scene_manager.py`: seed-deterministic EpisodeConfig applied to the *running* world via
+      gz services — **~6 s episode reset, no Gazebo restart**. Wired: sun direction/intensity
+      (via spawning an `ep_light` entity — `/world/*/light_config` acks but never reaches the
+      sensors render scene, measured), ground-color slab (skipped for parking_lot so bay lines
+      stay visible), prop placement with **guaranteed hard negatives** (same-color + same-shape
+      distractors always present; exact goal duplicates excluded so the instruction stays
+      unique), spawn-pose teleport (verified err 0.000 m), goal + instruction string; config
+      JSON = episode metadata. Camera-verified frames for all three families. Deferred to M1:
+      weather, exposure/extrinsic jitter, sensor noise, texture-level materials, sky.
+      Verification lesson recorded in README: **never run two gz servers** — services
+      round-robin between them and episodes half-apply.
+- [x] 1.5 ROS 2 bridge up: /observation (camera + state) out, /cmd (steer, throttle) in;
       clock discipline documented (sim time).
+      **DONE 2026-07-19** — `/observation` ≜ {`/vla_camera/image`, `/vla_camera/camera_info`,
+      `/observation/state`}; state = 50 Hz `[speed, yaw_rate, steering]` (yaw rate pose-derived
+      per the 1.3 finding; steering = equivalent bicycle angle from both knuckles). Command
+      interface decision: **(v, ω) `TwistStamped` on `/cmd_vel`**, not raw steer/throttle —
+      identical to the real rover's PX4 `rover_speed_steering` cmd_vel mapping, so the sim2real
+      interface is unchanged; steer/throttle conversion is the controller's job on both sides.
+      Closed-loop verified: state reads v 0.500 / yaw 1.000 / steer 0.335 against a
+      (0.5 m/s, 1.0 rad/s) command. Clock discipline documented in rover/README.md (single gz
+      `/clock`, `use_sim_time` everywhere, header-stamp arithmetic only, `ros2 topic pub`
+      wall-stamp warning).
 - [ ] 1.6 Expert stack: privileged A* on the sim map + Pure Pursuit through the Ackermann
       model; drives sampled start→goal routes with goal-visible-at-start validity check.
 - [ ] 1.7 Recorder → **LeRobot format**: RGB 10–15 Hz, GT pose 50 Hz, (speed, yaw rate,

@@ -94,6 +94,12 @@ def generate_launch_description() -> LaunchDescription:
         parameters=[use_sim_time],
     )
 
+    state_publisher = Node(
+        package='rover_sim',
+        executable='state_publisher.py',
+        output='screen',
+    )
+
     controller_spawner = Node(
         package='controller_manager',
         executable='spawner',
@@ -121,6 +127,7 @@ def generate_launch_description() -> LaunchDescription:
         gazebo_full,
         robot_state_publisher,
         bridge,
+        state_publisher,
         spawn_entity,
         controllers_after_spawn,
     ])

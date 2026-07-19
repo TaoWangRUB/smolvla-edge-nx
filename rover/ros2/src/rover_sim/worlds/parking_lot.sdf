@@ -1,0 +1,110 @@
+<?xml version="1.0" ?>
+<!--
+  Scene family: parking lot. Bay markings scaled to the 1/16 rover
+  (0.4 x 0.7 m bays) plus two parked-vehicle-sized static boxes.
+  Props/lighting/materials randomized by scene_manager.py.
+-->
+<sdf version="1.9">
+  <world name="parking_lot">
+    <physics name="1ms" type="ignored">
+      <max_step_size>0.001</max_step_size>
+      <real_time_factor>1.0</real_time_factor>
+    </physics>
+    <plugin filename="gz-sim-physics-system" name="gz::sim::systems::Physics"/>
+    <plugin filename="gz-sim-user-commands-system" name="gz::sim::systems::UserCommands"/>
+    <plugin filename="gz-sim-sensors-system" name="gz::sim::systems::Sensors">
+      <render_engine>ogre2</render_engine>
+    </plugin>
+    <plugin filename="gz-sim-scene-broadcaster-system" name="gz::sim::systems::SceneBroadcaster"/>
+
+    <light type="directional" name="sun">
+      <cast_shadows>true</cast_shadows>
+      <pose>0 0 10 0 0 0</pose>
+      <diffuse>0.35 0.35 0.35 1</diffuse>
+      <specular>0.5 0.5 0.5 1</specular>
+      <direction>-0.5 0.1 -0.9</direction>
+    </light>
+
+    <model name="ground_plane">
+      <static>true</static>
+      <link name="link">
+        <collision name="collision">
+          <geometry>
+            <plane><normal>0 0 1</normal><size>200 200</size></plane>
+          </geometry>
+        </collision>
+        <visual name="visual">
+          <geometry>
+            <plane><normal>0 0 1</normal><size>200 200</size></plane>
+          </geometry>
+          <material>
+            <ambient>0.45 0.45 0.47 1</ambient>
+            <diffuse>0.45 0.45 0.47 1</diffuse>
+            <specular>0.1 0.1 0.1 1</specular>
+          </material>
+        </visual>
+      </link>
+    </model>
+
+    <!-- Five bay divider lines: bays 0.4 m wide, 0.7 m deep, along +x at x=4 -->
+    <model name="bay_lines">
+      <static>true</static>
+      <pose>4.0 0 0.001 0 0 0</pose>
+      <link name="link">
+        <visual name="line_0">
+          <pose>0 -0.8 0 0 0 0</pose>
+          <geometry><box><size>0.7 0.04 0.002</size></box></geometry>
+          <material><ambient>0.9 0.9 0.9 1</ambient><diffuse>0.9 0.9 0.9 1</diffuse></material>
+        </visual>
+        <visual name="line_1">
+          <pose>0 -0.4 0 0 0 0</pose>
+          <geometry><box><size>0.7 0.04 0.002</size></box></geometry>
+          <material><ambient>0.9 0.9 0.9 1</ambient><diffuse>0.9 0.9 0.9 1</diffuse></material>
+        </visual>
+        <visual name="line_2">
+          <pose>0 0.0 0 0 0 0</pose>
+          <geometry><box><size>0.7 0.04 0.002</size></box></geometry>
+          <material><ambient>0.9 0.9 0.9 1</ambient><diffuse>0.9 0.9 0.9 1</diffuse></material>
+        </visual>
+        <visual name="line_3">
+          <pose>0 0.4 0 0 0 0</pose>
+          <geometry><box><size>0.7 0.04 0.002</size></box></geometry>
+          <material><ambient>0.9 0.9 0.9 1</ambient><diffuse>0.9 0.9 0.9 1</diffuse></material>
+        </visual>
+        <visual name="line_4">
+          <pose>0 0.8 0 0 0 0</pose>
+          <geometry><box><size>0.7 0.04 0.002</size></box></geometry>
+          <material><ambient>0.9 0.9 0.9 1</ambient><diffuse>0.9 0.9 0.9 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+
+    <model name="parked_a">
+      <static>true</static>
+      <pose>4.0 -0.6 0.06 0 0 0</pose>
+      <link name="link">
+        <collision name="collision">
+          <geometry><box><size>0.55 0.25 0.12</size></box></geometry>
+        </collision>
+        <visual name="visual">
+          <geometry><box><size>0.55 0.25 0.12</size></box></geometry>
+          <material><ambient>0.2 0.2 0.25 1</ambient><diffuse>0.2 0.2 0.25 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+
+    <model name="parked_b">
+      <static>true</static>
+      <pose>4.0 0.6 0.06 0 0 0</pose>
+      <link name="link">
+        <collision name="collision">
+          <geometry><box><size>0.55 0.25 0.12</size></box></geometry>
+        </collision>
+        <visual name="visual">
+          <geometry><box><size>0.55 0.25 0.12</size></box></geometry>
+          <material><ambient>0.5 0.48 0.45 1</ambient><diffuse>0.5 0.48 0.45 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+  </world>
+</sdf>
