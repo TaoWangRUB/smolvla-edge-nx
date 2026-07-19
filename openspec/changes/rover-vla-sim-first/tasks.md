@@ -163,11 +163,27 @@ purchase is gated behind M2 (except camera *selection*, which is an M0 task by d
       server round-trip **~280 ms/inference** (3.6 chunks/s vs 2.5 s horizon ≈ 9× replan
       overlap — inside D3's envelope). Transport is the D8 client/server lineage; on the NX
       the chunk source becomes the all-ROS2 policy node with identical topics.
-- [ ] 2.7 Closed-loop rollouts in training-like scenes; measure success rate + swap test.
+- [x] 2.7 Closed-loop rollouts in training-like scenes; measure success rate + swap test.
+      **MEASURED 2026-07-19 (stage1_v2, frozen backbone)** — open_ground, unseen seeds
+      9000–9009, full async stack (policy server on Titan X ~280 ms/chunk → chunk client →
+      tracker): **success 5/10, swap 2/8**. Failure anatomy: (a) *saliency capture* — in 6/8
+      failed swap pairs the rover approached the SAME prop under both instructions (goes to a
+      preferred prop, ignores language); notably both swap PASSES were same-shape crate pairs
+      differing only in color, so color grounding partially works; (b) *razor-thin margins* —
+      5 "collisions" were −0.000…−0.008 m grazes against the circumscribed-circle model
+      (imitating the expert's own thin clearances, minus precision); (c) 2 timeouts. Eval log:
+      `rover/outputs/eval_stage1_v2_open_ground.log`.
 - [ ] 2.8 **Exit**: policy reaches visible goals above threshold in training-like scenes; swap
       test above chance. **Escape valve (pre-committed)**: if the swap test fails under the
       fully frozen backbone, pull vision-encoder LoRA forward into M1 (language model stays
       frozen).
+      **GATE NOT PASSED at stage1_v2 (swap 2/8) → escape valve invoked 2026-07-19.**
+      Implementation: lerobot has no "vision-trains/LM-frozen" combo
+      (`train_expert_only=false` unfreezes the LM too), so the runtime patch that already
+      fixes bf16 also freezes `text_model` in the unfrozen branch → stage1b trains vision
+      encoder + connector + expert with the language tower frozen, warm-started from the
+      stage1_v2 checkpoint. The saliency-capture failure mode is exactly the predicted
+      frozen-SigLIP-on-synthetic-textures deficiency (D5 contingency 1).
 - [ ] 2.9 Contingency check: if tracking oscillates on policy chunks, switch output to (κ, v)
       per design D2 before touching model capacity.
 
