@@ -79,14 +79,32 @@ def lerp_yaw(pose_rows, t):
             r0['yaw'] + a * dyaw]
 
 
-def convert(raw_root, out_root, repo_id, fps, include_failures):
+def convert(raw_root, out_root, repo_id, fps, include_failures,
+            chunk_k=0, chunk_dt=0.25, use_paraphrase=False):
     import cv2
     from lerobot.datasets.lerobot_dataset import LeRobotDataset
+
+    if chunk_k or use_paraphrase:
+        import sys as _sys
+        _sys.path.insert(0, str(pathlib.Path(__file__).parent))
+    if chunk_k:
+        from relabel import PoseTrack, waypoint_chunk
+    if use_paraphrase:
+        from instructions import paraphrase
 
     out = pathlib.Path(out_root) / repo_id.split('/')[-1]
     if out.exists():
         shutil.rmtree(out)
 
+    if chunk_k:
+        action_feature = {
+            'dtype': 'float32', 'shape': (3 * chunk_k,),
+            'names': [f'{f}{i}' for i in range(chunk_k)
+                      for f in ('x', 'y', 'v')],
+        }
+    else:
+        action_feature = {'dtype': 'float32', 'shape': (2,),
+                          'names': ['v', 'w']}
     features = {
         'observation.image': {'dtype': 'video', 'shape': (800, 1280, 3),
                               'names': ['height', 'width', 'channels']},
@@ -94,7 +112,7 @@ def convert(raw_root, out_root, repo_id, fps, include_failures):
                               'names': ['speed', 'yaw_rate', 'steering']},
         'observation.gt_pose': {'dtype': 'float32', 'shape': (3,),
                                 'names': ['x', 'y', 'yaw']},
-        'action': {'dtype': 'float32', 'shape': (2,), 'names': ['v', 'w']},
+        'action': action_feature,
     }
     ds = LeRobotDataset.create(repo_id=repo_id, fps=fps, root=out,
                                features=features, robot_type='ackermann_1_16',
@@ -113,18 +131,29 @@ def convert(raw_root, out_root, repo_id, fps, include_failures):
         state = Series(read_jsonl(ep / 'state.jsonl'),
                        ['speed', 'yaw_rate', 'steering'])
         cmd = Series(read_jsonl(ep / 'cmd.jsonl'), ['v', 'w'])
-        task = meta['config']['instruction']
+        cfg = meta['config']
+        task = cfg['instruction']
+        if use_paraphrase:
+            goal = cfg['props'][cfg['goal_index']]
+            task = paraphrase(goal['color'], goal['shape'], cfg['seed'])
+        track = PoseTrack(pose_rows) if chunk_k else None
 
         for fr in frames:
             img = cv2.imread(str(ep / 'frames' / f"{fr['i']:06d}.jpg"))
+            if chunk_k:
+                ch = waypoint_chunk(track, fr['t'], k=chunk_k, dt=chunk_dt)
+                action = np.asarray([c for wp in ch for c in wp],
+                                    dtype=np.float32)
+            else:
+                action = np.asarray(cmd.hold(fr['t']) or [0.0, 0.0],
+                                    dtype=np.float32)
             frame = {
                 'observation.image': cv2.cvtColor(img, cv2.COLOR_BGR2RGB),
                 'observation.state': np.asarray(state.lerp(fr['t']),
                                                 dtype=np.float32),
                 'observation.gt_pose': np.asarray(lerp_yaw(pose_rows, fr['t']),
                                                   dtype=np.float32),
-                'action': np.asarray(cmd.hold(fr['t']) or [0.0, 0.0],
-                                     dtype=np.float32),
+                'action': action,
             }
             try:
                 ds.add_frame({**frame, 'task': task})
@@ -144,9 +173,17 @@ def main():
     ap.add_argument('--repo-id', default='local/rover_sim_v0')
     ap.add_argument('--fps', type=int, default=15)
     ap.add_argument('--include-failures', action='store_true')
+    ap.add_argument('--chunk-k', type=int, default=0,
+                    help='emit K x (x,y,v) hindsight chunks as the action '
+                         '(flat 3K dims); 0 = provisional [v, w]')
+    ap.add_argument('--chunk-dt', type=float, default=0.25)
+    ap.add_argument('--paraphrase', action='store_true',
+                    help='replace canonical instructions with train-pool '
+                         'paraphrases (heldout pool stays reserved)')
     args = ap.parse_args()
     convert(args.raw_root, args.out, args.repo_id, args.fps,
-            args.include_failures)
+            args.include_failures, args.chunk_k, args.chunk_dt,
+            args.paraphrase)
 
 
 if __name__ == '__main__':
