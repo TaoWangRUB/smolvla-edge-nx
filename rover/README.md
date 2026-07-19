@@ -26,16 +26,57 @@ docker exec vla_sim bash -c 'source /opt/ros/jazzy/setup.bash && cd /vla/rover/r
 docker exec -d vla_sim bash -c 'source /opt/ros/jazzy/setup.bash && source /vla/rover/ros2/install/setup.bash && ros2 launch rover_sim sim_bringup.launch.py'
 ```
 
-Interface (all `use_sim_time`):
+## Observation / command contract (task 1.5)
+
+`/observation` is the topic set {`/vla_camera/image`, `/vla_camera/camera_info`,
+`/observation/state`}; commands enter on `/cmd_vel`. All nodes run `use_sim_time`.
 
 | Topic | Type | Direction | Notes |
 |---|---|---|---|
-| `/cmd_vel` | `geometry_msgs/TwistStamped` | in | Ackermann controller reference |
+| `/cmd_vel` | `geometry_msgs/TwistStamped` | in | Ackermann controller reference (v, ω). Matches the real rover's PX4 `rover_speed_steering` cmd_vel mapping. Clamp ω first (see limits) |
+| `/observation/state` | `std_msgs/Float32MultiArray` | out | 50 Hz: `[speed m/s, yaw_rate rad/s, steering rad]` — yaw rate pose-derived, steering = equivalent bicycle angle |
 | `/ackermann/gt_odom` | `nav_msgs/Odometry` | out | GT pose 50 Hz (label source; derive yaw rate from poses, not its twist) |
 | `/vla_camera/image` | `sensor_msgs/Image` | out | 1280×800 RGB; raw DDS caps ~4.3 Hz — compress/downscale for recording |
 | `/vla_camera/camera_info` | `sensor_msgs/CameraInfo` | out | fx=fy=537.0, cx=640, cy=400 |
 
 Verified vehicle limits (M0): steering ±0.6 rad, **min feasible turn radius ≈ 0.341 m**
 (inner-wheel limit) — the tracker must clamp ω to |ω| ≤ v / 0.341 before publishing.
+
+### Clock discipline (sim)
+
+- Gazebo is the single time authority: `/clock` is bridged and **every** node sets
+  `use_sim_time` — a node on wall clock silently corrupts stamp arithmetic.
+- All timestamps are `header.stamp` in sim time; nothing may read wall clock for
+  data association. Latency compensation (async policy loop) counts the sim-time
+  delta between the image `header.stamp` and chunk application.
+- `ros2 topic pub` stamps with wall clock — never use it against the controller's
+  `reference_timeout`; publish from a `use_sim_time` node (see the drive tests).
+- The recorder stores sim-time stamps; episode replay (task 1.8) depends on them.
+
+## Scenes + per-episode randomization (task 1.4)
+
+Scene families (structure-only worlds): `open_ground.sdf`, `corridor.sdf`,
+`parking_lot.sdf` (+ `props_ground.sdf` static smoke world). Per-episode
+randomization is applied to the *running* world — no Gazebo restart:
+
+```bash
+ros2 launch rover_sim sim_bringup.launch.py world:=$(ros2 pkg prefix rover_sim)/share/rover_sim/worlds/corridor.sdf
+ros2 run rover_sim scene_manager.py apply --scene corridor --seed 42 --out ep42.json
+ros2 run rover_sim scene_manager.py clear --scene corridor
+```
+
+**One simulator instance only**: before (re)launching, make sure no stale `gz sim`
+server is running (`pgrep -a ruby`). Two servers on the same world name merge
+their gz-transport topics/services and requests round-robin between them —
+episodes half-apply, teleports "fail", and debugging becomes archaeology.
+
+Randomized per episode (seed-deterministic, JSON-logged for failure slicing):
+sun elevation/azimuth/intensity (spawned as an `ep_light` entity — runtime
+`light_config` never reaches the sensors render scene), ground color slab
+(skipped in `parking_lot` so bay markings stay visible), prop set (shape ×
+color with **guaranteed hard negatives** — a same-color and a same-shape
+distractor always accompany the goal, and exact goal duplicates are excluded),
+prop placement, rover spawn pose, goal + instruction string.
+Exposure/extrinsic jitter/sensor noise are recorder-side hooks (M1).
 
 GUI debugging: add `gui:=true` to the launch (needs X forwarding / `xhost +local:`).

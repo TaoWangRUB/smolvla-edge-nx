@@ -8,4 +8,11 @@ install(
   DESTINATION share/${PROJECT_NAME}
 )
 
+install(
+  PROGRAMS
+    scripts/scene_manager.py
+    scripts/state_publisher.py
+  DESTINATION lib/${PROJECT_NAME}
+)
+
 ament_package()
