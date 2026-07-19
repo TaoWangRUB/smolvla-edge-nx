@@ -128,8 +128,24 @@ purchase is gated behind M2 (except camera *selection*, which is an M0 task by d
       phrasing split reserved.
 - [ ] 2.3 Generate ~500–1,000 episodes across the M0 scenes with multi-target layouts and
       attribute-sharing hard negatives (red cone + red barrel; red cone + blue cone).
+      *Progress 2026-07-19*: batch machinery proven — 36-episode pilot (12 seeds × 3 scenes,
+      32/36 expert success; failures logged with reasons and auto-skipped) → 34-episode
+      `local/rover_vla_v1` (4,812 frames). Full-scale run is a parameter change on the same
+      script (`/tmp/batch.sh` pattern → promote into `rover/datagen/` when scaling).
 - [ ] 2.4 Stage-one training: SmolVLA, frozen VLM backbone, action expert on K×(x,y,v)
       (chunk_size=K, action_dim=3); velocity-scaled directional blur augmentation active.
+      *Progress 2026-07-19 — **process verified on small data (user-directed gate)***:
+      stage-one smoke on the **Titan X** (Maxwell 12 GB, fp32 — lerobot's hardcoded bf16 VLM
+      load patched, see `rover/train_smoke.sh`): 300 steps @ batch 8, 1.1 step/s, **loss
+      2.94 → 0.38**, checkpoint saved, reloaded, and produced correct-shape 10×(x,y,v) chunks
+      on a dataset frame with proper language tokenization (`make_language_tokenizer`).
+      **Action-space refinement (recorded)**: with stock `lerobot-train`, hindsight chunks are
+      stored FLAT (K=10 → 30 dims ≤ max_action_dim=32, `chunk_size=1`) because lerobot's
+      `delta_timestamps` chunking would gather future frames' own-body-frame actions — wrong
+      frame semantics for D2's single-frame chunk. Remaining for the real 2.4: full-scale
+      data, blur augmentation, and the D2-native (chunk_size=K, action_dim=3) shape if a
+      custom collate is adopted. Ops notes: `--shm-size=8g` mandatory (64 MB default kills
+      dataloader workers); Maxwell cannot bf16 (CUBLAS_STATUS_NOT_SUPPORTED).
 - [ ] 2.5 Tracker node: Pure Pursuit at 50–100 Hz on EKF odometry (sim: GT + noise), hard
       limits (max speed, steering rate, min turn radius) enforced.
 - [ ] 2.6 Async policy loop wired (AsyncRunner semantics): chunk replaces queue after
