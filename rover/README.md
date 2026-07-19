@@ -36,7 +36,7 @@ docker exec -d vla_sim bash -c 'source /opt/ros/jazzy/setup.bash && source /vla/
 | `/cmd_vel` | `geometry_msgs/TwistStamped` | in | Ackermann controller reference (v, ω). Matches the real rover's PX4 `rover_speed_steering` cmd_vel mapping. Clamp ω first (see limits) |
 | `/observation/state` | `std_msgs/Float32MultiArray` | out | 50 Hz: `[speed m/s, yaw_rate rad/s, steering rad]` — yaw rate pose-derived, steering = equivalent bicycle angle |
 | `/ackermann/gt_odom` | `nav_msgs/Odometry` | out | GT pose 50 Hz (label source; derive yaw rate from poses, not its twist) |
-| `/vla_camera/image` | `sensor_msgs/Image` | out | 1280×800 RGB; raw DDS caps ~4.3 Hz — compress/downscale for recording |
+| `/vla_camera/image` | `sensor_msgs/Image` | out | 1280×800 RGB at 15 Hz (a real subscriber gets the full rate; `ros2 topic hz` under-reports ~4 Hz — CLI overhead on 3 MB msgs) |
 | `/vla_camera/camera_info` | `sensor_msgs/CameraInfo` | out | fx=fy=537.0, cx=640, cy=400 |
 
 Verified vehicle limits (M0): steering ±0.6 rad, **min feasible turn radius ≈ 0.341 m**
@@ -80,3 +80,29 @@ prop placement, rover spawn pose, goal + instruction string.
 Exposure/extrinsic jitter/sensor noise are recorder-side hooks (M1).
 
 GUI debugging: add `gui:=true` to the launch (needs X forwarding / `xhost +local:`).
+
+**No default route?** If the host has no network (or gz prints `Exception sending a
+multicast message`), export `GZ_IP=127.0.0.1` in every shell that talks to Gazebo —
+gz-transport discovery needs a usable interface and falls over without one.
+
+## Recording episodes (task 1.7)
+
+With the sim running, one command produces one raw episode directory
+(frames @15 Hz JPEG, 50 Hz `gt_pose`/`state` JSONL, expert commands,
+intrinsics, `episode.json` with config + verdict + success/collision flags):
+
+```bash
+ros2 run rover_expert run_episode.py --scene open_ground --seed 2 --out-root /vla/rover/data/raw
+```
+
+Convert raw episodes to a LeRobotDataset (runs in the lerobot env, not ROS):
+
+```bash
+docker run --rm -v "$PWD":/work -w /work -e HF_HOME=/work/.hf_cache smolvla-edge:sim \
+  python rover/datagen/to_lerobot.py --raw-root rover/data/raw --out rover/data/lerobot
+```
+
+Load with `video_backend='pyav'` (repo convention). The LeRobot `action` field
+is the expert (v, ω) command for now — task 2.1's hindsight relabeler rebuilds
+it as K×(x, y, v) waypoint chunks from the raw 50 Hz pose stream, which stays
+in the episode dirs precisely for that purpose. `rover/data/` is gitignored.
