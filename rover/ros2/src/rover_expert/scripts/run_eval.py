@@ -1,0 +1,215 @@
+#!/usr/bin/env python3
+"""Closed-loop policy evaluation (task 2.7): success rate + swap test.
+
+Prerequisites: sim running (matching world), policy server running
+(rover/runtime/policy_server.py on the Titan X). Per episode this script
+resets the scene (fresh eval seed), starts tracker_node + chunk_client_node
+with the episode's instruction, and watches GT odometry until the rover
+reaches the commanded target's 0.6 m ring (success), collides (clearance
+<= 0), or times out. The rover never sees privileged info — only this
+referee does.
+
+Swap test (--swap): each scene is run twice from identical layout — once
+commanding the goal, once commanding the same-shape/different-color hard
+negative (skipped if that combo is not unique in the scene). The pair
+passes when the rover approaches the *commanded* prop both times.
+
+Verdicts stream as JSON lines; a summary prints at the end.
+"""
+
+import argparse
+import json
+import math
+import signal
+import subprocess
+import sys
+import time
+
+import rclpy
+from rclpy.node import Node
+from rclpy.parameter import Parameter
+from nav_msgs.msg import Odometry
+
+# Keep in sync with expert_driver.py (same privileged geometry).
+PROP_RADIUS = {'barrel': 0.15, 'pillar': 0.08, 'crate': 0.29, 'ball': 0.15}
+SCENE_STATICS = {
+    'open_ground': [],
+    'props_ground': [],
+    'corridor': [(3.0, 0.9, 10.0, 0.1), (3.0, -0.9, 10.0, 0.1)],
+    'parking_lot': [(4.0, -0.6, 0.55, 0.25), (4.0, 0.6, 0.55, 0.25)],
+}
+ROVER_RADIUS = 0.18
+REACH = 0.60
+TIMEOUT_S = 40.0
+
+
+class Referee(Node):
+    """Watches GT odometry; declares reached / collision / timeout."""
+
+    def __init__(self, cfg, target_idx):
+        super().__init__('eval_referee', parameter_overrides=[
+            Parameter('use_sim_time', Parameter.Type.BOOL, True)])
+        self.cfg = cfg
+        self.target = cfg['props'][target_idx]
+        self.result = None
+        self.t0 = None
+        self.min_clear = 1e9
+        self.pose = None
+        self.create_subscription(Odometry, '/ackermann/gt_odom', self.on_odom, 50)
+        self.create_timer(0.05, self.tick)
+
+    def on_odom(self, m):
+        p = m.pose.pose.position
+        self.pose = (p.x, p.y)
+        for prop in self.cfg['props']:
+            c = (math.hypot(p.x - prop['x'], p.y - prop['y'])
+                 - PROP_RADIUS[prop['shape']] - ROVER_RADIUS)
+            self.min_clear = min(self.min_clear, c)
+        for cx, cy, sx, sy in SCENE_STATICS[self.cfg['scene']]:
+            dx = max(abs(p.x - cx) - sx / 2, 0.0)
+            dy = max(abs(p.y - cy) - sy / 2, 0.0)
+            self.min_clear = min(self.min_clear, math.hypot(dx, dy) - ROVER_RADIUS)
+
+    def tick(self):
+        if self.result is not None or self.pose is None:
+            return
+        now = self.get_clock().now().nanoseconds * 1e-9
+        if now <= 0:
+            return
+        if self.t0 is None:
+            self.t0 = now
+        d = math.hypot(self.pose[0] - self.target['x'],
+                       self.pose[1] - self.target['y'])
+        if d <= REACH:
+            self.finish('reached', now)
+        elif self.min_clear <= 0.0:
+            self.finish('collision', now)
+        elif now - self.t0 > TIMEOUT_S:
+            self.finish('timeout', now)
+
+    def finish(self, outcome, now):
+        x, y = self.pose
+        dists = {p['name']: round(math.hypot(x - p['x'], y - p['y']), 3)
+                 for p in self.cfg['props']}
+        nearest = min(dists, key=dists.get)
+        self.result = {
+            'outcome': outcome,
+            'success': outcome == 'reached' and self.min_clear > 0.0,
+            'time_s': round(now - self.t0, 2),
+            'min_clearance_m': round(self.min_clear, 3),
+            'nearest_prop': nearest,
+            'dist_to_target': dists[self.target['name']],
+        }
+
+
+def start_node(pkg, script, params):
+    args = ['ros2', 'run', pkg, script, '--ros-args']
+    for k, v in params.items():
+        args += ['-p', f'{k}:={v}']
+    import os
+    return subprocess.Popen(args, stdout=subprocess.DEVNULL,
+                            stderr=subprocess.DEVNULL, preexec_fn=os.setsid)
+
+
+def stop_node(proc):
+    import os
+    try:
+        os.killpg(os.getpgid(proc.pid), signal.SIGINT)
+        proc.wait(timeout=8)
+    except Exception:
+        try:
+            os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
+        except Exception:
+            pass
+
+
+def instruction_for(prop):
+    return f"drive to the {prop['color']} {prop['shape']}"
+
+
+def run_one(scene, seed, server_host, server_port, target_idx=0,
+            instruction=None, reset_scene=True):
+    cfg_path = f'/tmp/eval_cfg_{scene}_{seed}.json'
+    if reset_scene:
+        r = subprocess.run(['ros2', 'run', 'rover_sim', 'scene_manager.py',
+                            'apply', '--scene', scene, '--seed', str(seed),
+                            '--out', cfg_path],
+                           capture_output=True, text=True)
+        if r.returncode != 0:
+            return {'outcome': 'scene_failed', 'success': False}
+        time.sleep(2.0)
+    else:
+        subprocess.run(['ros2', 'run', 'rover_sim', 'scene_manager.py',
+                        'apply', '--scene', scene, '--seed', str(seed),
+                        '--out', cfg_path], capture_output=True, text=True)
+        time.sleep(2.0)
+    cfg = json.load(open(cfg_path))
+    task = instruction or instruction_for(cfg['props'][target_idx])
+
+    tracker = start_node('rover_runtime', 'tracker_node.py', {})
+    client = start_node('rover_runtime', 'chunk_client_node.py', {
+        'server_host': server_host, 'server_port': server_port,
+        'instruction': task,
+    })
+    time.sleep(1.0)
+
+    rclpy.init()
+    ref = Referee(cfg, target_idx)
+    while rclpy.ok() and ref.result is None:
+        rclpy.spin_once(ref, timeout_sec=0.5)
+    rclpy.shutdown()
+
+    stop_node(client)
+    stop_node(tracker)
+    res = dict(ref.result)
+    res.update({'scene': scene, 'seed': seed, 'instruction': task,
+                'target': cfg['props'][target_idx]['name']})
+    return res, cfg
+
+
+def swap_target_index(cfg):
+    """Index of the same-shape/diff-color hard negative if uniquely
+    describable in this scene, else None. Sampler places it at index 2."""
+    props = cfg['props']
+    cand = props[2]
+    combo = (cand['shape'], cand['color'])
+    if sum(1 for p in props if (p['shape'], p['color']) == combo) != 1:
+        return None
+    return 2
+
+
+def main():
+    ap = argparse.ArgumentParser(description=__doc__)
+    ap.add_argument('--scene', required=True)
+    ap.add_argument('--seed0', type=int, default=9000)
+    ap.add_argument('--episodes', type=int, default=10)
+    ap.add_argument('--swap', action='store_true')
+    ap.add_argument('--server-host', default='127.0.0.1')
+    ap.add_argument('--server-port', type=int, default=8790)
+    args = ap.parse_args()
+
+    n_ok = 0
+    swap_pairs = swap_ok = 0
+    for i in range(args.episodes):
+        seed = args.seed0 + i
+        res, cfg = run_one(args.scene, seed, args.server_host, args.server_port)
+        print(json.dumps(res), flush=True)
+        n_ok += bool(res['success'])
+        if args.swap:
+            alt = swap_target_index(cfg)
+            if alt is None:
+                continue
+            res2, _ = run_one(args.scene, seed, args.server_host,
+                              args.server_port, target_idx=alt)
+            print(json.dumps(res2), flush=True)
+            swap_pairs += 1
+            a_ok = res['success'] and res['nearest_prop'] == res['target']
+            b_ok = res2['success'] and res2['nearest_prop'] == res2['target']
+            swap_ok += bool(a_ok and b_ok)
+
+    print(f'SUMMARY scene={args.scene} success={n_ok}/{args.episodes}'
+          + (f' swap={swap_ok}/{swap_pairs}' if args.swap else ''))
+
+
+if __name__ == '__main__':
+    main()
