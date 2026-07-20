@@ -28,3 +28,35 @@ Web context: SigLIP does encode color (the information is present in the tokens)
 
 ## Fix (data-side, this rung of the ladder)
 Place **all** candidate props in the visible cone with comparable centrality so the goal is not privileged, guaranteeing the same-shape/different-color twin is equally visible → **color becomes necessary** to disambiguate; the positional shortcut dies. Then regenerate the dataset, retrain (frozen backbone — the stable recipe), and re-run the swap test.
+
+## Update 2026-07-21 — sampler fix did not restore color grounding
+
+Regenerated `local/rover_vla_v3` (520 ep, confound-fixed sampler) and retrained the frozen
+backbone (stage1_v3, 10k, loss ~0.16). Results:
+
+| measure | stage1_v2 (v2 data) | stage1_v3 (v3 data) |
+|---|---|---|
+| closed-loop success (open_ground 9000-9009) | 5/10 | 3/10 * |
+| closed-loop swap | 2/8 | 0/9 * |
+| offline directional acc (on raw_v3 frames) | 0.62 | **0.71** |
+| offline color swap-flip (on raw_v3 frames) | 0.27 | 0.18 |
+
+\* Closed-loop v3 is on HARDER scenes (fixed sampler clusters props in the cone), so the
+success/swap drop is largely scene difficulty, not model regression — the controlled probe
+(both checkpoints on identical raw_v3 frames) is the fair comparison.
+
+**Read:** the sampler fix removed a genuine shortcut and modestly improved shape/side grounding
+(directional 0.62 -> 0.71), but **color-word binding stayed at chance** (swap-flip ~0.2, chance
+0.25) for both models. Removing the data confound was necessary and correct, but it was **not**
+the cause of the color failure. With the earlier full-unfreeze regression, the color-grounding
+limit is now isolated to **model capacity**: frozen SmolVLA (single SigLIP + small action
+expert) does not bind color attributes at ~500-episode scale.
+
+**Next rung (D5 contingency 1, done correctly):** vision-encoder **LoRA** — low-rank adapters on
+the SigLIP encoder, language model and base vision weights frozen (NOT the full unfreeze that
+scrambled features). If LoRA is also flat: color-stressed data / richer color cues, then the
+architecture fallback (Qwen2.5-VL + diffusion head, D5 contingency 4).
+
+**Methodology fix:** freeze a single eval scene set across model versions. Using the
+per-version sampler for eval made v3's closed-loop numbers incomparable to v2's (scene
+difficulty changed with the sampler).
