@@ -172,7 +172,7 @@ purchase is gated behind M2 (except camera *selection*, which is an M0 task by d
       differing only in color, so color grounding partially works; (b) *razor-thin margins* —
       5 "collisions" were −0.000…−0.008 m grazes against the circumscribed-circle model
       (imitating the expert's own thin clearances, minus precision); (c) 2 timeouts. Eval log:
-      `rover/outputs/eval_stage1_v2_open_ground.log`.
+      `rover/eval_results/eval_stage1_v2_open_ground.log`.
 - [ ] 2.8 **Exit**: policy reaches visible goals above threshold in training-like scenes; swap
       test above chance. **Escape valve (pre-committed)**: if the swap test fails under the
       fully frozen backbone, pull vision-encoder LoRA forward into M1 (language model stays
@@ -184,6 +184,19 @@ purchase is gated behind M2 (except camera *selection*, which is an M0 task by d
       encoder + connector + expert with the language tower frozen, warm-started from the
       stage1_v2 checkpoint. The saliency-capture failure mode is exactly the predicted
       frozen-SigLIP-on-synthetic-textures deficiency (D5 contingency 1).
+      **RESULT 2026-07-20 — escape valve REGRESSED, did not fix grounding.** stage1b (10k
+      steps, wandb run `les64mau`, loss → ~0.12) re-evaluated on the identical seeds 9000–9009:
+      **success 2/10 (was 5/10), swap 0/8 (was 2/8)** — worse on both axes. Symptom shift:
+      more timeouts and wandering (one run drove 11 m from every prop), i.e. the *navigation*
+      degraded, not just grounding. Diagnosis: stage1b was a **FULL vision-encoder unfreeze**,
+      but D5 contingency 1 specifies **vision-encoder LoRA** — the full unfreeze of a ~400 M
+      SigLIP on ~1 epoch of 568 synthetic episodes (fp32 batch 8) is under-constrained; it
+      drifted the pretrained features and pulled them out from under the expert head that had
+      converged on them in stage1. Evidence reading: the frozen features were *not* the sole
+      bottleneck (unconstrained adaptation hurt), so the next move is either the *constrained*
+      LoRA the design actually prescribed, or the data-side rungs (harder per-scene negatives /
+      more instruction diversity / more episodes). Eval log:
+      `rover/eval_results/eval_stage1b_v2_open_ground.log`. **Gate still open; decision pending.**
 - [ ] 2.9 Contingency check: if tracking oscillates on policy chunks, switch output to (κ, v)
       per design D2 before touching model capacity.
 

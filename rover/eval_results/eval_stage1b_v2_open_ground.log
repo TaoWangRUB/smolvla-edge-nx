@@ -1,0 +1,23 @@
+# stage1b_v2 closed-loop eval (open_ground, seeds 9000-9009, swap test)
+# Reconstructed from the live eval verdict stream (container removed before copy).
+# Policy: rover/outputs/train/stage1b_v2/checkpoints/last (full vision unfreeze, LM frozen)
+# SUMMARY: success=2/10 swap=0/8   (baseline stage1_v2 was success=5/10 swap=2/8)
+{"outcome": "collision", "success": false, "time_s": 13.25, "min_clearance_m": -0.001, "nearest_prop": "ep_prop_2", "dist_to_target": 3.535, "scene": "open_ground", "seed": 9000, "instruction": "drive to the blue barrel", "target": "ep_prop_0"}
+{"outcome": "timeout", "success": false, "time_s": 40.05, "min_clearance_m": 0.06, "nearest_prop": "ep_prop_3", "dist_to_target": 0.883, "scene": "open_ground", "seed": 9000, "instruction": "drive to the green barrel", "target": "ep_prop_2"}
+{"outcome": "collision", "success": false, "time_s": 21.8, "min_clearance_m": -0.002, "nearest_prop": "ep_prop_3", "dist_to_target": 0.824, "scene": "open_ground", "seed": 9001, "instruction": "drive to the red crate", "target": "ep_prop_0"}
+{"outcome": "reached", "success": true, "time_s": 23.65, "min_clearance_m": 0.129, "nearest_prop": "ep_prop_2", "dist_to_target": 0.599, "scene": "open_ground", "seed": 9001, "instruction": "drive to the yellow crate", "target": "ep_prop_2"}
+{"outcome": "collision", "success": false, "time_s": 10.15, "min_clearance_m": -0.0, "nearest_prop": "ep_prop_2", "dist_to_target": 1.62, "scene": "open_ground", "seed": 9002, "instruction": "drive to the yellow pillar", "target": "ep_prop_0"}
+{"outcome": "reached", "success": true, "time_s": 6.65, "min_clearance_m": 0.338, "nearest_prop": "ep_prop_2", "dist_to_target": 0.598, "scene": "open_ground", "seed": 9002, "instruction": "drive to the red pillar", "target": "ep_prop_2"}
+{"outcome": "reached", "success": true, "time_s": 14.55, "min_clearance_m": 0.269, "nearest_prop": "ep_prop_0", "dist_to_target": 0.599, "scene": "open_ground", "seed": 9003, "instruction": "drive to the red barrel", "target": "ep_prop_0"}
+{"outcome": "timeout", "success": false, "time_s": 40.05, "min_clearance_m": 0.121, "nearest_prop": "ep_prop_1", "dist_to_target": 2.929, "scene": "open_ground", "seed": 9003, "instruction": "drive to the yellow barrel", "target": "ep_prop_2"}
+{"outcome": "reached", "success": true, "time_s": 13.0, "min_clearance_m": 0.268, "nearest_prop": "ep_prop_0", "dist_to_target": 0.598, "scene": "open_ground", "seed": 9004, "instruction": "drive to the green barrel", "target": "ep_prop_0"}
+{"outcome": "timeout", "success": false, "time_s": 40.05, "min_clearance_m": 0.25, "nearest_prop": "ep_prop_2", "dist_to_target": 4.809, "scene": "open_ground", "seed": 9004, "instruction": "drive to the red barrel", "target": "ep_prop_2"}
+{"outcome": "timeout", "success": false, "time_s": 40.05, "min_clearance_m": 3.134, "nearest_prop": "ep_prop_0", "dist_to_target": 10.952, "scene": "open_ground", "seed": 9005, "instruction": "drive to the red crate", "target": "ep_prop_0"}
+{"outcome": "collision", "success": false, "time_s": 15.7, "min_clearance_m": -0.001, "nearest_prop": "ep_prop_3", "dist_to_target": 2.524, "scene": "open_ground", "seed": 9005, "instruction": "drive to the green crate", "target": "ep_prop_2"}
+{"outcome": "collision", "success": false, "time_s": 20.35, "min_clearance_m": -0.001, "nearest_prop": "ep_prop_2", "dist_to_target": 1.364, "scene": "open_ground", "seed": 9006, "instruction": "drive to the blue crate", "target": "ep_prop_0"}
+{"outcome": "timeout", "success": false, "time_s": 40.05, "min_clearance_m": 0.003, "nearest_prop": "ep_prop_4", "dist_to_target": 4.15, "scene": "open_ground", "seed": 9006, "instruction": "drive to the yellow crate", "target": "ep_prop_2"}
+{"outcome": "collision", "success": false, "time_s": 24.65, "min_clearance_m": -0.012, "nearest_prop": "ep_prop_2", "dist_to_target": 3.505, "scene": "open_ground", "seed": 9007, "instruction": "drive to the blue pillar", "target": "ep_prop_0"}
+{"outcome": "timeout", "success": false, "time_s": 40.0, "min_clearance_m": 0.485, "nearest_prop": "ep_prop_2", "dist_to_target": 2.371, "scene": "open_ground", "seed": 9008, "instruction": "drive to the green crate", "target": "ep_prop_0"}
+{"outcome": "reached", "success": true, "time_s": 17.15, "min_clearance_m": 0.128, "nearest_prop": "ep_prop_2", "dist_to_target": 0.598, "scene": "open_ground", "seed": 9008, "instruction": "drive to the red crate", "target": "ep_prop_2"}
+{"outcome": "collision", "success": false, "time_s": 23.05, "min_clearance_m": -0.003, "nearest_prop": "ep_prop_5", "dist_to_target": 5.127, "scene": "open_ground", "seed": 9009, "instruction": "drive to the blue ball", "target": "ep_prop_0"}
+SUMMARY scene=open_ground success=2/10 swap=0/8
