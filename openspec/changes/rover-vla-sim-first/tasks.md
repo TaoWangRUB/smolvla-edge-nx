@@ -224,6 +224,26 @@ purchase is gated behind M2 (except camera *selection*, which is an M0 task by d
       retrain frozen backbone (on Colab, see 2.4) → re-run swap.** If swap lifts, the frozen
       backbone binds color once data forces it (no LoRA needed); if flat, LoRA (properly, not a
       full unfreeze) is the next rung.
+      **RESULT 2026-07-21 — sampler fix did NOT restore color grounding (frozen-backbone limit).**
+      `local/rover_vla_v3` (520 ep, confound-fixed sampler) → stage1_v3 (frozen backbone, 10k,
+      loss ~0.16, wandb `bya6kgwd`). Closed-loop open_ground seeds 9000–9009: **success 3/10,
+      swap 0/9** — *but not comparable to the v2 baseline*: the v3 eval scenes use the same
+      fixed sampler, so props cluster in the cone and navigation is genuinely harder (many
+      grazes/timeouts; e.g. 9008 swap headed to the correct prop but timed out 1.05 m short).
+      **Controlled offline probe (both checkpoints on identical raw_v3 frames)** decouples
+      grounding from that difficulty: stage1_v3 directional **0.71** vs stage1_v2 **0.62** (modest
+      shape/side gain), but color swap-flip **0.18 (v3) vs 0.27 (v2)** — *both at chance (0.25)*.
+      Verdict: removing the saliency shortcut was a real data improvement and modestly helped
+      shape/side grounding, but **color-word binding is unchanged and at chance** — the data
+      confound was not the cause of the color failure. Combined with the full-unfreeze
+      regression, this isolates it to **model capacity**: frozen SmolVLA (single SigLIP + tiny
+      action expert) does not bind color attributes at this scale. Next rung per D5: **vision-
+      encoder LoRA done correctly** (low-rank, LM + base-SigLIP frozen — *not* the full unfreeze
+      that regressed); if LoRA also flat, escalate to color-stressed data / richer color cues, or
+      the D5-contingency-4 architecture (Qwen2.5-VL + diffusion head). Logs:
+      `rover/eval_results/eval_stage1_v3_open_ground.log`. Methodology note: keep a fixed eval
+      scene set across model versions, or closed-loop success conflates policy quality with scene
+      difficulty (observed here).
 - [ ] 2.9 Contingency check: if tracking oscillates on policy chunks, switch output to (κ, v)
       per design D2 before touching model capacity.
 
