@@ -159,14 +159,25 @@ lerobot's `delta_timestamps` chunking would gather future frames' *own-body-fram
 wrong frame semantics for [design D2](../openspec/changes/rover-vla-sim-first/design.md)'s
 single-frame chunk. Revisit (custom collate → chunk_size=K, action_dim=3) if quality demands.
 
-**Titan X (Maxwell, 12 GB) requirements** — baked into `train_smoke.sh`:
+Set `WANDB=true WANDB_API_KEY=…` to stream metrics to the `rover-vla` project. Resume by
+pointing `POLICY_PATH` at `…/checkpoints/last/pretrained_model` instead of the base.
+
+### Training hosts
+
+**Local Titan X (Maxwell, 12 GB)** — baked into `train_smoke.sh`:
 - `--shm-size=8g` (docker's 64 MB `/dev/shm` default silently kills dataloader workers);
 - lerobot's hardcoded `torch_dtype="bfloat16"` VLM load patched to `float32`
   (Maxwell: `CUBLAS_STATUS_NOT_SUPPORTED` on bf16 GEMM);
-- fp32 @ batch 8 ≈ 1.1 step/s. Smoke validation: 300 steps, loss 2.94 → 0.38,
-  checkpoint reloads and predicts correct-shape chunks.
+- fp32 @ batch 8 ≈ 0.86 s/step; a 10k-step run ≈ 2.5 h.
 
-Resume: point `POLICY_PATH` at `…/checkpoints/last/pretrained_model` instead of the base.
+**Google Colab** — [`rover/train_colab.ipynb`](train_colab.ipynb) (open via
+`colab.research.google.com/github/<owner>/smolvla-edge-nx/blob/feature/rover-vla-sim/rover/train_colab.ipynb`):
+- A100/L4 give bf16 + batch 32–64 (~10× faster than the Titan X); T4/V100 auto-fall back to
+  the fp32 patch at batch 16 (compute-capability detected in the notebook);
+- **datagen and closed-loop eval stay local** — Colab does training only. Flow: regenerate the
+  dataset locally → `tar czf` it → upload to Drive → run the notebook → download the checkpoint
+  tarball → eval locally with `policy_server.py` + `run_eval.py`;
+- streams to the same `rover-vla` wandb project (key via a Colab secret).
 
 ## Eval pipeline ([design D6](../openspec/changes/rover-vla-sim-first/design.md), tasks 2.7–2.8)
 
@@ -192,8 +203,27 @@ policy sees only camera + state; privileged geometry stays in the referee.
   chunk horizon (≈9× replan overlap); tracker watchdog ramps to stop past 1 s staleness.
 
 M1 exit ([tasks.md §2.8](../openspec/changes/rover-vla-sim-first/tasks.md)): above-threshold
-success in training-like scenes + above-chance swap. Pre-committed escape valve: if swap
-fails under the frozen backbone, pull vision-encoder LoRA forward (language model stays frozen).
+success in training-like scenes + above-chance swap.
+
+### M1 results so far + the grounding diagnosis
+
+| Model | success | swap | note |
+|---|---|---|---|
+| stage1_v2 (frozen backbone) | 5/10 | 2/8 | best; swap ≈ chance |
+| stage1b_v2 (full vision unfreeze) | 2/10 | 0/8 | **regressed** — full unfreeze ≠ design's LoRA |
+
+The gate failed on grounding (swap ≈ chance). An **offline grounding probe**
+([`rover/eval_results/grounding_probe.py`](eval_results/grounding_probe.py)) localized it:
+the policy grounds **shape** (directional accuracy 0.71) but **not color** (swap-flip 0.10,
+below chance) — it steers to a fixed salient object regardless of the color word. Root cause
+was a **data confound**, not model capacity: the sampler placed the goal in the camera cone
+while distractors scattered uniformly, so "drive to the object ahead" was a winning shortcut.
+Fixed in `scene_manager.sample()` (all props in-cone, equal centrality → color is required).
+Full writeup: [`rover/eval_results/grounding_diagnosis.md`](eval_results/grounding_diagnosis.md).
+**Next:** regenerate → `local/rover_vla_v3` → retrain frozen backbone (Colab) → re-run swap.
+If swap stays flat, the pre-committed escape valve is vision-encoder **LoRA** — low-rank and
+constrained (the full unfreeze that regressed was *not* that; LoRA keeps the language model and
+the base SigLIP weights frozen).
 
 ## Demos
 
