@@ -146,6 +146,15 @@ purchase is gated behind M2 (except camera *selection*, which is an M0 task by d
       data, blur augmentation, and the D2-native (chunk_size=K, action_dim=3) shape if a
       custom collate is adopted. Ops notes: `--shm-size=8g` mandatory (64 MB default kills
       dataloader workers); Maxwell cannot bf16 (CUBLAS_STATUS_NOT_SUPPORTED).
+      *Full-scale run 2026-07-19/20*: `local/rover_vla_v2` (568 ep / 78k frames) → stage1_v2,
+      10k steps, loss 2.94 → 0.108, wandb project `rover-vla`. Evaluated (see 2.7/2.8): the
+      grounding gate failed on a *data* confound, fixed in the sampler; the retrain on the
+      `local/rover_vla_v3` data is the next run.
+      **Training host options**: (a) **Titan X** local (Maxwell, fp32, batch 8, ~2.5 h) via
+      `rover/train_smoke.sh` — set `WANDB=true WANDB_API_KEY=…`; (b) **Google Colab** via
+      `rover/train_colab.ipynb` — A100/L4 give bf16 + batch 32–64 (~10× faster), T4/V100 auto-
+      fall back to the fp32 patch; datagen and closed-loop eval stay on the local rover host,
+      Colab does training only (upload the dataset tarball to Drive, download the checkpoint).
 - [x] 2.5 Tracker node: Pure Pursuit at 50–100 Hz on EKF odometry (sim: GT + noise), hard
       limits (max speed, steering rate, min turn radius) enforced.
       **DONE 2026-07-19** — `rover_runtime/tracker_node.py`: 50 Hz PP on waypoint chunks,
@@ -197,6 +206,24 @@ purchase is gated behind M2 (except camera *selection*, which is an M0 task by d
       LoRA the design actually prescribed, or the data-side rungs (harder per-scene negatives /
       more instruction diversity / more episodes). Eval log:
       `rover/eval_results/eval_stage1b_v2_open_ground.log`. **Gate still open; decision pending.**
+      **ROOT CAUSE FOUND 2026-07-20 (offline grounding probe).**
+      `rover/eval_results/grounding_probe.py` feeds the trained policy the same frame under
+      different instructions and measures whether the predicted chunk turns toward the named
+      object. stage1_v2: **directional accuracy 0.71** (reads shape/side) but **swap-flip 0.10 —
+      below chance 0.25** (ignores color among same-shape objects; mean bearing change 12.7°).
+      The policy grounds *shape* but not *color*. Cause is a **data confound**, not model
+      capacity: `scene_manager.sample()` placed the goal in the forward camera cone while all
+      distractors scattered uniformly, so the goal was always the most salient object → the
+      policy learned "drive to the object ahead" and never needed to read color; the swap test
+      (which commands the peripheral hard negative) exposed it. Web context: SigLIP *does*
+      encode color, but frozen-VLM SmolVLA + tiny expert is a documented weak grounder — so the
+      data must force color to matter. **Fix committed**: sampler now places all props in-cone
+      with comparable centrality (goal not privileged; same-shape/different-color twin equally
+      visible → color is the only disambiguator). Full writeup:
+      `rover/eval_results/grounding_diagnosis.md`. **Next: regenerate → `local/rover_vla_v3` →
+      retrain frozen backbone (on Colab, see 2.4) → re-run swap.** If swap lifts, the frozen
+      backbone binds color once data forces it (no LoRA needed); if flat, LoRA (properly, not a
+      full unfreeze) is the next rung.
 - [ ] 2.9 Contingency check: if tracking oscillates on policy chunks, switch output to (κ, v)
       per design D2 before touching model capacity.
 
