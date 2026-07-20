@@ -26,9 +26,11 @@ GPU="${GPU:-1}"   # 1 = Titan X (12 GB), 0 = A2000 (4 GB)
 # dataloading of 1280x800 frames (worker "exited unexpectedly").
 # The sed patches lerobot's hardcoded bfloat16 VLM load to float32: Maxwell
 # (Titan X, sm_52) has no bf16 — cuBLAS fails with STATUS_NOT_SUPPORTED.
+# W&B: set WANDB_API_KEY in the environment to stream metrics (project rover-vla).
 docker run --rm --runtime nvidia --shm-size=8g \
   -e NVIDIA_VISIBLE_DEVICES=all -e CUDA_VISIBLE_DEVICES="${GPU}" \
   -e HF_HOME=/work/.hf_cache \
+  -e WANDB_API_KEY="${WANDB_API_KEY:-}" \
   -v "$PWD":/work -w /work \
   smolvla-edge:sim \
   bash -c "sed -i 's/torch_dtype=\"bfloat16\"/torch_dtype=\"float32\"/' \
@@ -46,4 +48,5 @@ docker run --rm --runtime nvidia --shm-size=8g \
     --steps=${STEPS} \
     --save_freq=${STEPS} \
     --log_freq=10 \
+    --wandb.enable=${WANDB:-false} --wandb.project=rover-vla --wandb.mode=online \
     --output_dir=${OUTPUT_DIR}"

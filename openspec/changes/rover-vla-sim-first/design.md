@@ -147,6 +147,21 @@ accounting), and reuses its harness patterns.
 
 ## D7 — Deployment: measured Xavier NX baseline; Orin as upgrade, not prerequisite [refined]
 
+**On-hand hardware [confirmed 2026-07-20].** The `ackermann_rover_humble` platform is already
+built and bring-up-complete: 1/16 Ackermann chassis with PX4 actuation (steering servo + ESC),
+Xavier NX, D435i (color RGB + IR-stereo depth + IMU), T265 (mono global-shutter fisheye + IMU),
+cuVSLAM/VINS odometry, EKF, RPLidar, CubePilot. So M3 is *not* a hardware buy-in — the depth,
+IMU, lidar and odometry the safety monitor and EKF need all exist. The one policy-facing gap is
+the forward RGB camera: the policy needs **color + global-shutter + rectilinear + ~100° FOV**,
+and no on-hand camera has all four (D435i color is rolling-shutter and ~69° HFOV; T265 is mono
+fisheye — ruled out by D1). The OV9782-class module (task 1.2) fills exactly that gap for ~$40.
+
+**Camera bridge (zero purchase, degraded).** For a first real-world transfer test before the
+OV9782 arrives, the D435i color stream (`/d435i/color/image_raw`) can feed the policy — but the
+sim/real match then breaks (sim camera is locked to OV9782's 100° HFOV / fx=537). Re-lock the
+simulated camera to D435i-color intrinsics for that specific run and treat the rolling-shutter
+motion artifacts as an extra transfer-gap term; keep the OV9782 as the final-config sensor.
+
 The draft plan targeted Orin. This repo has since **measured** the on-hand Xavier NX:
 fp16 + full-forward CUDA-graph capture = 233 ms/chunk (bitwise-exact), 4.3 chunks/s — against a
 2–3 s chunk horizon that is ~10× replan overlap, comfortably inside the async operating

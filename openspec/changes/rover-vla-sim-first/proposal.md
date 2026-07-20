@@ -83,8 +83,12 @@ the neural network.
 
 ## Non-Goals (recorded)
 
-- No hardware purchase before the M2 exit criteria pass (camera model *selection* is allowed
-  and required early; purchase of the rover/Jetson/sensors is the M3 gate).
+- No hardware purchase before the M2 exit criteria pass. **Rescoped 2026-07-20**: the rover,
+  Xavier NX, D435i (color RGB + depth + IMU), T265, lidar and actuation are **already on hand**
+  (the `ackermann_rover_humble` platform), so the M3 "purchase" is a single ~$40 OV9782-class
+  global-shutter RGB camera — the one sensor the policy needs that no existing camera provides
+  (D435i color is rolling-shutter/narrow-FOV; T265 is mono fisheye). A D435i-color bridge run
+  is possible with zero purchase.
 - No fisheye/stereo camera input to the policy; no raw IMU or lidar into the policy — depth/lidar
   feed only the geometric safety monitor.
 - No mission layer (SLAM + global planning) before M4; phases 1–2 run entirely without it.
