@@ -203,13 +203,26 @@ purchase is gated behind M2 (except camera *selection*, which is an M0 task by d
       characterization per environment factor.
 - [ ] 3.7 Safety monitor node (sim): geometric corridor check on sim depth, speed cap / stop
       veto, measured intervention rate — network-independent by construction.
-- [ ] 3.8 **Exit (hardware purchase gate)**: success + collision metrics meet targets on
-      held-out scenes; failure modes characterized; scaling decisions justified by metrics only.
+- [ ] 3.8 **Exit (camera-purchase / real-run gate)**: success + collision metrics meet targets
+      on held-out scenes; failure modes characterized; scaling decisions justified by metrics
+      only. (Rescoped 2026-07-20: the rover/Jetson/sensors are already on hand — see 4.1 — so
+      this gate now authorizes the single OV9782 camera purchase and real-world runs, not a
+      hardware buy-in.)
 
-## 4. M3 — Real rover (hardware purchase gate opens here)
+## 4. M3 — Real rover (hardware on hand; only the policy camera is a purchase)
 
-- [ ] 4.1 Purchase: rover chassis, Jetson (Xavier NX on hand is the baseline per design D7;
-      Orin only if M2 metrics demand it), the selected camera, IMU, depth sensor, e-stop.
+- [ ] 4.1 **Hardware inventory (rescoped 2026-07-20 — most hardware already owned)**: the
+      `ackermann_rover_humble` platform exists and is bring-up-complete — 1/16 Ackermann
+      chassis with PX4 actuation (steering servo + ESC), **Xavier NX** (the design-D7
+      baseline), **D435i** (color RGB `/d435i/color/image_raw` + IR-stereo depth + IMU) and
+      **T265** (mono global-shutter fisheye stereo + IMU), cuVSLAM/VINS odometry, EKF, RPLidar,
+      CubePilot IMU/GPS. **The only genuine gap for the policy is a color, global-shutter,
+      rectilinear, ~100° RGB camera** — none of the on-hand cameras hit all four (D435i color
+      is rolling-shutter and ~69° HFOV; T265 is mono + fisheye, ruled out by D1). Purchase is
+      therefore a single ~$40 OV9782-class module (task 1.2), not a rover/Jetson/sensor buy.
+      **Zero-purchase bridge**: the D435i color stream can drive a first transfer test before
+      the OV9782 arrives (accepting rolling shutter + narrower FOV; re-lock the sim camera to
+      D435i intrinsics for that run — see design D7).
 - [ ] 4.2 Bring-up: sensor drivers, EKF (robot_localization), tracker, safety monitor as the
       same ROS 2 nodes as sim; actuator interface (steering servo PWM + ESC).
 - [ ] 4.3 **Timestamping bench (blocking)**: hardware shutter timestamps wired; blinking-LED
