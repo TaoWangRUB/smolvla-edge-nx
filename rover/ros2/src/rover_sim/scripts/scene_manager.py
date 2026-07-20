@@ -88,9 +88,20 @@ def sample(scene: str, seed: int) -> EpisodeConfig:
     spawn = (0.0, rng.uniform(-0.3, 0.3) if scene != 'corridor' else 0.0,
              rng.uniform(-0.15, 0.15))
 
+    # Place EVERY prop inside the camera cone with comparable centrality — the
+    # goal must not be more salient than its distractors, or the policy learns
+    # "drive to the object ahead" and never reads the instruction (measured
+    # 2026-07-20: goal-in-cone / distractors-uniform gave a saliency shortcut,
+    # swap flip 0.10 < chance). Cone: +-0.85*HFOV, 2-7 m, min separation.
     def place(existing, min_sep=0.7):
-        for _ in range(200):
-            x, y = rng.uniform(x0, x1), rng.uniform(y0, y1)
+        for _ in range(400):
+            dist = rng.uniform(2.0, min(7.0, x1))
+            bearing = spawn[2] + rng.uniform(-CAM_HALF_FOV * 0.85,
+                                             CAM_HALF_FOV * 0.85)
+            x = spawn[0] + dist * math.cos(bearing)
+            y = spawn[1] + dist * math.sin(bearing)
+            if not (x0 <= x <= x1 and y0 <= y <= y1):
+                continue
             if math.hypot(x - spawn[0], y - spawn[1]) < 1.2:
                 continue
             if all(math.hypot(x - p.x, y - p.y) >= min_sep for p in existing):
@@ -101,18 +112,14 @@ def sample(scene: str, seed: int) -> EpisodeConfig:
     goal_shape = rng.choice(list(SHAPES))
     goal_color = rng.choice(list(COLORS))
 
-    # Goal must be visible from spawn: inside the camera cone, 2-7 m out.
-    for _ in range(200):
-        dist = rng.uniform(2.0, min(7.0, x1))
-        bearing = spawn[2] + rng.uniform(-CAM_HALF_FOV * 0.8, CAM_HALF_FOV * 0.8)
-        gx = spawn[0] + dist * math.cos(bearing)
-        gy = spawn[1] + dist * math.sin(bearing)
-        if x0 <= gx <= x1 and y0 <= gy <= y1:
-            break
+    # Goal placed the SAME way as everything else (no centrality privilege).
+    gx, gy = place(props)
     props.append(Prop('ep_prop_0', goal_shape, goal_color, gx, gy,
                       rng.uniform(0, math.pi)))
 
     # Hard negatives (spec requirement): share color, and share shape.
+    # ep_prop_2 (same shape, different color) is the swap-test twin — placed in
+    # the cone like the goal, so color is the ONLY cue that separates them.
     other_shapes = [s for s in SHAPES if s != goal_shape]
     other_colors = [c for c in COLORS if c != goal_color]
     hard = [(rng.choice(other_shapes), goal_color),
