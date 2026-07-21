@@ -378,7 +378,14 @@ purchase is gated behind M2 (except camera *selection*, which is an M0 task by d
       Publish the true goal to `/goal_memory/set_odom`, drive with the tracker, confirm
       out-of-view goals are still reached. This is the user's stated fallback ("just tell it
       the goal position") and isolates memory+tracker before detector error is added.
-- [ ] 5.4 Swap the detector in for real acquisition (D9 step c).
+- [~] 5.4 Swap the detector in for real acquisition (D9 step c) - NODE WRITTEN 2026-07-21,
+      awaiting sim. `rover_runtime/goal_acquisition_node.py`: instruction -> target phrase ->
+      OWLv2 (one query per pass) -> ground-plane projection -> `/goal_memory/set_relative`,
+      published ONCE then latched (goal_memory holds it in odom). Inference runs off the
+      executor thread - it is seconds long and would otherwise stall /clock and the 50 Hz
+      tracker. `eval_results/test_goal_acquisition.py`: 304 checks, all 18 datagen templates
+      x 16 colour/shape pairs incl. held-out phrasings, plus a guard that the node's
+      vocabulary has not drifted from scene_manager's.
       **NanoOWL is ruled out** — its `owlvit-base-patch32` backbone gets 22% recall here
       (39% tiled) vs OWLv2's 100%, and recall is FLAT vs range (29% at 0.5 m), so neither
       tiling nor approach-and-lock recovers it. Needs an OWLv2-class detector.
