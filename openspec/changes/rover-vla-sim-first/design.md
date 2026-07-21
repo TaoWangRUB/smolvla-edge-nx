@@ -288,3 +288,47 @@ lineage), arrived at empirically rather than by analogy.
 **Validation order.** (a) ground-plane projection + unit tests; (b) **privileged-goal integration
 test** (`/goal_memory/set_odom`) — isolates memory+tracker before adding detector error, and is
 the "just tell it the goal position" fallback; (c) swap in the detector for real acquisition.
+
+### D9 validation — acquisition path measured offline (2026-07-21)
+
+Step (a) of the D9 validation order is **done, and the result is decisive**. The full
+acquisition path (open-vocabulary detector → ground-plane projection → body-frame goal) was
+run on 59 recorded `rover_vla_v4` episodes and scored against ground truth taken from
+`scene_config.json` (prop world position + spawn pose ⇒ exact body-frame goal). No sim, no
+ROS — so this ran while datagen held the simulator.
+
+| metric | acquisition path | SmolVLA policy (M1) |
+|---|---|---|
+| commanded phrase detected | **59/59** | — |
+| **selects the commanded prop** | **58/59 (98%)** | ≈ chance (swap-flip 0.05–0.27) |
+| position error (median / p90) | **0.13 m / 0.35 m** | ends 0.32–0.60 m from *some* prop |
+| bearing error (median) | **0.1°** | 22.3° change under swap |
+| inside the 0.6 m goal ring | **58/59** | 2–3/10 |
+
+Detector: `google/owlv2-base-patch16-ensemble`, threshold 0.05.
+
+**Two geometry terms were missing on the first attempt** and together caused a systematic
+~25% under-range (median error 0.63 m — right at the goal ring, i.e. it would have looked
+"almost working" while being wrong):
+
+1. `vla_cam_z = 0.15` in the URDF is the camera height above **base_link**, not above the
+   ground. True height ≈ **0.20 m**. A least-squares sweep over recorded episodes converged
+   independently on 0.20 m, matching the URDF derivation — a genuine cross-check, so the
+   number is trusted rather than fitted.
+2. The camera sits **forward** of base_link (`wheel_base/2 + 0.10 = 0.187 m`). Projection
+   yields camera-frame range; labels and tracker use the body frame.
+
+Plus a perception term: the bbox bottom edge is the object's **near face**, not its centre,
+so the class radius (`OBJECT_RADIUS`) is added back along the ray.
+
+**Gotcha for the runtime detector node — query one phrase per forward pass.** Batching every
+prop phrase into a single OWL-ViT call lets the queries suppress one another: 13/39 targets
+scored **exactly 0.0000** in multi-query mode and **0.10–0.29** when queried alone. This was
+invisible to a threshold sweep (0.015→0.08 gave bit-identical results, because the scores were
+not low, they were zero), and it looked exactly like a detector capability limit. Recall went
+**26/39 → 59/59** on this one change. Querying alone did *not* cause confident locks onto the
+wrong object — selection accuracy stayed at 98%.
+
+**What this settles.** Goal *selection* — the thing SmolVLA never learned — is solved to 98%
+by a component that needs no training. The remaining risk in D9 is not acquisition; it is
+whether memory + tracker hold the goal once it leaves view. That is validation step (b).
