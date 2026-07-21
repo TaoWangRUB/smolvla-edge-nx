@@ -10,7 +10,11 @@ set -uo pipefail
 cd "$(dirname "$0")/../.."
 
 RAW=rover/data/raw_v4
-OUT=rover/data/lerobot/rover_vla_v4
+# to_lerobot appends repo_id's basename: out = OUT_PARENT/<repo basename>.
+# Passing the full dataset path creates rover_vla_v4/rover_vla_v4 and the
+# existence check below then "fails" on a conversion that actually succeeded.
+OUT_PARENT=rover/data/lerobot
+OUT="$OUT_PARENT/rover_vla_v4"
 REPO=local/rover_vla_v4
 SCENES="${SCENES:-open_ground,parking_lot}"     # corridor: no path at 2.0-3.5 m
 LOG=rover/data/pipeline_v4.log
@@ -42,7 +46,7 @@ say "convert: -> $OUT (chunk_k=10 x (x,y,v) = 30-dim flat action, fps 15)"
 docker run --rm --shm-size=8g -v "$PWD":/vla -w /vla -e HF_HOME=/vla/.hf_cache \
   smolvla-edge:sim \
   python /vla/rover/datagen/to_lerobot.py \
-    --raw-root "$RAW" --out "$OUT" --repo-id "$REPO" \
+    --raw-root "$RAW" --out "$OUT_PARENT" --repo-id "$REPO" \
     --scenes "$SCENES" --chunk-k 10 --chunk-dt 0.25 --fps 15 >> "$LOG" 2>&1
 if [ ! -f "$OUT/meta/info.json" ]; then
   say "ABORT: conversion produced no dataset"
