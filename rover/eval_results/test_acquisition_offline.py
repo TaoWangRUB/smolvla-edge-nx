@@ -27,6 +27,29 @@ from goal_projection import (  # noqa: E402
     CAM_HEIGHT, OBJECT_RADIUS, bbox_to_body_groundplane)
 
 
+def tiles_of(img, spec):
+    """Overlapping tiles as (crop, (x_offset, y_offset)). '1x1' = whole image.
+
+    Small distant props survive the detector's square resize poorly; cropping
+    raises their effective resolution. 50% overlap so a prop straddling a tile
+    boundary still lands whole in a neighbour.
+    """
+    cols, rows = (int(v) for v in spec.lower().split('x'))
+    if cols == 1 and rows == 1:
+        return [(img, (0, 0))]
+    W, H = img.size
+    tw, th = W // cols, H // rows
+    sx, sy = tw // 2, th // 2                      # 50% overlap
+    out = []
+    for r in range(rows * 2 - 1):
+        for c in range(cols * 2 - 1):
+            x, y = c * sx, r * sy
+            if x + tw > W or y + th > H:
+                continue
+            out.append((img.crop((x, y, x + tw, y + th)), (x, y)))
+    return out
+
+
 def true_body_goal(cfg, idx=None):
     """Commanded prop in the body frame at spawn (exact, from the config)."""
     idx = cfg['goal_index'] if idx is None else idx
@@ -43,6 +66,9 @@ def main():
     ap.add_argument('--n', type=int, default=20)
     ap.add_argument('--model', default='google/owlv2-base-patch16-ensemble')
     ap.add_argument('--thresh', type=float, default=0.08)
+    ap.add_argument('--tiles', default='1x1',
+                    help='CxR overlapping tiles, e.g. 3x2. Acquisition runs at 0.1-1 Hz\n'
+                         '(design D3), so extra forward passes are affordable.')
     ap.add_argument('--multi-query', dest='single_query', action='store_false',
                     help='batch all prop phrases in one pass (suppresses targets)')
     ap.add_argument('--template', default='{}',
@@ -91,15 +117,19 @@ def main():
         best, best_score = None, -1
         for fp in fps:                     # first confident hit wins
             img = Image.open(fp).convert('RGB')
-            inputs = proc(text=[qlist], images=img, return_tensors='pt').to(dev)
-            with torch.no_grad():
-                out = model(**inputs)
-            res = proc.post_process_grounded_object_detection(
-                outputs=out, target_sizes=torch.tensor([img.size[::-1]]).to(dev),
-                threshold=args.thresh)[0]
-            for score, label, box in zip(res['scores'], res['labels'], res['boxes']):
-                if int(label) == ti and float(score) > best_score:
-                    best, best_score = [float(v) for v in box], float(score)
+            for crop, (ox, oy) in tiles_of(img, args.tiles):
+                inputs = proc(text=[qlist], images=crop, return_tensors='pt').to(dev)
+                with torch.no_grad():
+                    out = model(**inputs)
+                res = proc.post_process_grounded_object_detection(
+                    outputs=out, target_sizes=torch.tensor([crop.size[::-1]]).to(dev),
+                    threshold=args.thresh)[0]
+                for score, label, box in zip(res['scores'], res['labels'], res['boxes']):
+                    if int(label) == ti and float(score) > best_score:
+                        b = [float(v) for v in box]
+                        # tile coords -> full-image coords
+                        best = [b[0] + ox, b[1] + oy, b[2] + ox, b[3] + oy]
+                        best_score = float(score)
             if best is not None:
                 break
         if best is None:

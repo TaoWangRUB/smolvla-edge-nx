@@ -332,3 +332,43 @@ wrong object — selection accuracy stayed at 98%.
 **What this settles.** Goal *selection* — the thing SmolVLA never learned — is solved to 98%
 by a component that needs no training. The remaining risk in D9 is not acquisition; it is
 whether memory + tracker hold the goal once it leaves view. That is validation step (b).
+
+### D9 risk — the deployable detector cannot ground these phrases (2026-07-21)
+
+The 98% acquisition result above used `owlv2-base-patch16-ensemble`. **NanoOWL — the TensorRT
+path that made an on-NX detector look cheap — is built on `owlvit-base-patch32`, and that model
+does not work for this task.** Measured on the same 59 episodes, single-query:
+
+| model | recall | correct-prop | params | input | latency (A2000) |
+|---|---|---|---|---|---|
+| `owlvit-base-patch32` | **13/59 (22%)** | 13/13 | 153M | 768² | **271 ms** |
+| `owlvit-base-patch32`, 3×2 tiles | 23/59 (39%) | 20/22 (91%) | — | — | ~6× above |
+| `owlvit-base-patch16` | 6/59 (10%) | 6/6 | — | — | — |
+| `owlv2-base-patch16-ensemble` | **59/59 (100%)** | **58/59 (98%)** | 155M | 960² | **3190 ms** |
+
+Precision is perfect whenever patch32 fires — it is purely a **recall** failure.
+
+Two hypotheses were tested and both rejected:
+
+- *Object scale.* Tiling to raise effective resolution moved recall only 22% → 39%.
+- *Range.* Recall vs. true range is **flat**: 29% at 0.5 m, 28% at 2.0 m, 19% at 3.0 m, 0% at
+  3.5 m. At half a metre the prop dominates the frame and it still misses ~70%. So an
+  approach-and-lock search behaviour does **not** recover acquisition.
+
+The gap is model quality (OWLv2's web-scale self-training), not resolution or distance. Same
+parameter count; the cost difference is tokens — 960²/patch16 = 3600 vs 768²/patch32 = 576.
+
+**Consequence.** D9's acquisition stage requires an OWLv2-class detector, which is ~12× the
+compute NanoOWL promised. This is **not yet fatal**, because per D3 acquisition is a mission-loop
+operation at 0.1–1 Hz, not a control-loop one: the goal enters odom-frame memory and is held, so
+a multi-second one-shot acquisition is tolerable where a multi-second control step would not be.
+But the NanoOWL "~95 ms on Orin" figure must be struck from the deployment plan.
+
+**Open, and must be measured on real hardware before M4 commits:** OWLv2 latency and memory on
+the Xavier NX under TensorRT/fp16. A2000-fp32 → NX extrapolation spans ~1–10 s, which is too wide
+to plan against. Until that number exists, treat on-NX acquisition as **unproven**.
+
+Fallbacks if OWLv2 does not fit, in preference order: (1) distil OWLv2 into a smaller detector on
+our own recorded episodes (`scene_config.json` gives exact supervision); (2) run acquisition once
+off-board at mission start; (3) closed-vocabulary colour+shape segmentation — trivially fast and
+near-perfect in sim, but abandons open-vocabulary generality and would not survive sim2real.
