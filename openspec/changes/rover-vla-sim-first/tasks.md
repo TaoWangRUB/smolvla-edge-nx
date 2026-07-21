@@ -186,6 +186,15 @@ purchase is gated behind M2 (except camera *selection*, which is an M0 task by d
       test above chance. **Escape valve (pre-committed)**: if the swap test fails under the
       fully frozen backbone, pull vision-encoder LoRA forward into M1 (language model stays
       frozen).
+      > **STATUS 2026-07-21 — GATE OPEN. Navigation works; colour grounding does not.**
+      > Probe (fair comparison, identical frames; chance = 0.25):
+      > stage1_v2 0.27 → stage1_v3 0.18 → stage1c_v3 **0.05**, directional 0.62 → 0.71 → 0.75.
+      > **Four interventions have failed to move colour grounding** — data-confound fix, frozen
+      > backbone, full vision unfreeze, constrained vision adaptation — so the **vision encoder
+      > is ruled out**. Leading hypothesis: SmolVLA truncates the LM to the first **16 of 32**
+      > layers (`num_vlm_layers`), and colour-word→object binding lives in the discarded upper
+      > half. **Next: `num_vlm_layers` 16→32 from base (Colab `MODE='C'`, needs A100).** If flat,
+      > escalate to D5 contingency 4 (Qwen2.5-VL + diffusion head). Chronological detail below.
       **GATE NOT PASSED at stage1_v2 (swap 2/8) → escape valve invoked 2026-07-19.**
       Implementation: lerobot has no "vision-trains/LM-frozen" combo
       (`train_expert_only=false` unfreezes the LM too), so the runtime patch that already
