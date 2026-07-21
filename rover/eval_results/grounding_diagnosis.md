@@ -83,6 +83,10 @@ Directional accuracy is the best of the three (0.75) while swap-flip collapsed t
 Below-chance swap-flip means the policy steers to a **fixed salient object regardless of the
 instruction**, and adapting vision made it do that *more* confidently.
 
+Closed-loop (open_ground seeds 9000-9009): **success 3/10, swap 0/9** — identical to
+stage1_v3's 3/10, 0/9, confirming the probe: vision adaptation changed navigation quality but
+not grounding. Log: `rover/eval_results/eval_stage1c_v3_open_ground.log`.
+
 ### Converging evidence: the vision encoder is not the bottleneck
 Four interventions, none of which moved colour grounding:
 1. data confound fix (v2 -> v3 sampler) — swap-flip 0.27 -> 0.18
