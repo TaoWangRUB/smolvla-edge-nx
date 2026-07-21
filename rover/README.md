@@ -248,17 +248,34 @@ suspects:
    and the *worst* colour-grounder (swap-flip 0.05, below chance). Adapting vision made it steer
    to its preferred object *more* confidently while still ignoring the word.
 
-**Leading hypothesis: the truncated language model.** SigLIP demonstrably encodes colour, so the
-missing step is *binding* the colour word to an object — a cross-modal attention operation that
-happens inside the LM. SmolVLA truncates the LM to the **first 16 of 32 layers**
-(`num_vlm_layers=16`; `text_model.layers = text_model.layers[:16]`), so if fine attribute binding
-lives in the discarded upper half, no amount of vision adaptation can recover it.
+**Reframed (2026-07-21): this is a horizon/memory problem, not a colour problem.**
+A fifth intervention — un-truncating the LM to 32 layers (`stage1d_deeplm`, 706M) — reached
+swap-flip **0.27**, still ≈ chance. Trace analysis then showed why the metric could never move:
+the rover **approaches some prop precisely** (0.32–0.60 m in 8/10 runs) but **never heads toward
+the commanded one**, and when the target is far it goes to the **nearest** prop in 4/5 cases.
+The expert scores **10/10** on the same scenes. So the earlier "colour binding is broken" reading
+was **under-determined** — a proximity-driven policy and a colour-blind one give identical swap
+scores.
 
-**Next experiment (priority):** raise `num_vlm_layers` 16 → 32 and train from base —
-`MODE='C'` in [`train_colab.ipynb`](train_colab.ipynb) (needs A100 VRAM; the action expert
-resizes to match, so it is a from-base run, not a warm start). If swap lifts, the truncation was
-the cause. If it is flat too, the cheap levers are exhausted and the escalation is design D5
-contingency 4 (Qwen2.5-VL + diffusion head).
+**Root cause.** SmolVLA is a *local, memoryless* controller doing *long-horizon goal selection*:
+`n_obs_steps=1` (and SmolVLA never reads that field — frame history is unavailable without model
+surgery), chunk horizon 2.5 s ≈ **1.25 m**, goals **2–7 m** away. Once the goal leaves the ~100°
+FOV, **nothing in the input says where it is**. Design D3 assigned goal persistence to the mission
+loop; deferring that loop left the policy doing the mission layer's job.
+
+**Decision (design D9):** split grounding from control — open-vocabulary detector (OWL-ViT via
+**NanoOWL**, which unlike a 3B VLM actually fits the Xavier NX) → geometric projection → goal held
+in the **odom frame** → existing tracker. Qwen2.5-VL as a policy backbone was rejected on measured
+deployment grounds (12.1 GB / 28.5 s on Jetson Xavier vs 8 GB available).
+
+**In flight:** `rover_vla_v4` with goals at **2.0–3.5 m**, range-equalised — keeps the goal in view
+*and* removes the distance confound, making the swap test a clean colour measure for the first time.
+
+**Built for the long-term fix** (task 5.1, pulled forward from M4):
+`rover_runtime/goal_memory_node.py` (odom-frame goal memory, emits the policy's `/waypoint_chunk`
+format so the tracker is unchanged) and `goal_projection.py` (bbox → body frame; ground-plane for
+sim's RGB-only camera, depth for the D435i). Unit-tested offline: 19 + 25 checks, including a goal
+*behind* the rover staying exactly localised, and 5–16 cm ranging accuracy across 2.0–3.5 m.
 
 Full writeup and per-episode logs:
 [`rover/eval_results/grounding_diagnosis.md`](eval_results/grounding_diagnosis.md).

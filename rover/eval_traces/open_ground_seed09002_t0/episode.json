@@ -1,0 +1,84 @@
+{
+  "config": {
+    "seed": 9002,
+    "scene": "open_ground",
+    "sun_elevation_deg": 23.86147851505794,
+    "sun_azimuth_deg": 280.3760377367631,
+    "sun_intensity": 1.138469268404577,
+    "ground_rgb": [
+      0.7575141439751019,
+      0.6949253279847205,
+      0.3376848775355552
+    ],
+    "spawn": [
+      0.0,
+      -0.13472073981139177,
+      -0.046075863475186135
+    ],
+    "props": [
+      {
+        "name": "ep_prop_0",
+        "shape": "pillar",
+        "color": "yellow",
+        "x": 3.703277605108478,
+        "y": 0.12492341313803668,
+        "yaw": 2.822982999209233
+      },
+      {
+        "name": "ep_prop_1",
+        "shape": "barrel",
+        "color": "yellow",
+        "x": 3.831104570449616,
+        "y": -2.252508639636705,
+        "yaw": 1.6359991947910961
+      },
+      {
+        "name": "ep_prop_2",
+        "shape": "pillar",
+        "color": "red",
+        "x": 4.764359126149458,
+        "y": 0.01937189582955176,
+        "yaw": 2.331022342715703
+      },
+      {
+        "name": "ep_prop_3",
+        "shape": "barrel",
+        "color": "yellow",
+        "x": 3.8925028846338767,
+        "y": -1.140417210272191,
+        "yaw": 0.19417271497581953
+      },
+      {
+        "name": "ep_prop_4",
+        "shape": "ball",
+        "color": "blue",
+        "x": 2.7198892151242653,
+        "y": -1.6041869915826652,
+        "yaw": 3.0903285382888037
+      },
+      {
+        "name": "ep_prop_5",
+        "shape": "barrel",
+        "color": "blue",
+        "x": 5.28865137827584,
+        "y": 0.613944332128271,
+        "yaw": 2.9273450209595366
+      }
+    ],
+    "goal_index": 0,
+    "instruction": "drive to the yellow pillar"
+  },
+  "verdict": {
+    "outcome": "collision",
+    "success": false,
+    "time_s": 12.2,
+    "min_clearance_m": -0.001,
+    "nearest_prop": "ep_prop_3",
+    "dist_to_target": 1.102,
+    "scene": "open_ground",
+    "seed": 9002,
+    "instruction": "drive to the yellow pillar",
+    "target": "ep_prop_0"
+  },
+  "success": false
+}
