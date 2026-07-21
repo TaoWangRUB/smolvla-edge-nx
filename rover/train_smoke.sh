@@ -20,6 +20,10 @@ ROOT="${ROOT:-rover/data/lerobot/rover_vla_v1}"
 BATCH_SIZE="${BATCH_SIZE:-8}"
 STEPS="${STEPS:-300}"
 OUTPUT_DIR="${OUTPUT_DIR:-rover/outputs/train/smoke_v1}"
+# Checkpoint often, not just at the end. The Titan X is an eGPU and has
+# dropped off the Thunderbolt bus mid-run before (nv_pci_remove), costing
+# 1500 steps because the only save was scheduled at the finish.
+SAVE_FREQ="${SAVE_FREQ:-500}"
 GPU="${GPU:-1}"   # 1 = Titan X (12 GB), 0 = A2000 (4 GB)
 
 # --shm-size is mandatory: the default 64 MB /dev/shm kills multi-worker
@@ -46,7 +50,7 @@ docker run --rm --runtime nvidia --shm-size=8g \
     --rename_map='{"observation.image": "observation.images.camera1"}' \
     --batch_size=${BATCH_SIZE} \
     --steps=${STEPS} \
-    --save_freq=${STEPS} \
+    --save_freq=${SAVE_FREQ} \
     --log_freq=10 \
     --wandb.enable=${WANDB:-false} --wandb.project=rover-vla --wandb.mode=online \
     --output_dir=${OUTPUT_DIR}"
