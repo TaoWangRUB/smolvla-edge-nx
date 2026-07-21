@@ -42,7 +42,7 @@ run_scene () {
   for k in $(seq 0 $((SEEDS_PER_SCENE - 1))); do
     local seed=$((seed0 + k))
     out=$(timeout 240 ros2 run rover_expert run_episode.py \
-          --scene $scene --seed $seed --out-root "$OUT_ROOT" 2>/dev/null | tail -1)
+          --scene $scene --seed $seed --out-root "$OUT_ROOT" 2>/dev/null | grep -oE "\{.*\}" | tail -1)
     echo "EPISODE_DONE $scene $seed $out" >> "$LOG"
   done
 }

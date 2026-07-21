@@ -402,3 +402,41 @@ assumption. Re-run `test_acquisition_offline.py --scene parking_lot` when datage
 
 Even at 94%, this remains far above the policy it replaces (≈ chance goal selection, 2-3/10
 success), so the D9 decision stands.
+
+### v4 datagen — corridor is geometrically incompatible with the short horizon (2026-07-21)
+
+v4 finished 437/570: open_ground 87%, parking_lot 88%, **corridor 53%**. The corridor deficit is
+not flakiness and not fixable by retry — roughly half of v4's corridor scenes have **no path at
+all**.
+
+Mechanism. `corridor` is 1.2 m wide (`SCENE_BOUNDS y = -0.6..0.6`). A crate's blocking radius is
+`PROP_RADIUS 0.29 + INFLATE 0.28 = 0.57 m`. Compressing the goal range to 2.0-3.5 m (the whole
+point of v4) forces every prop into a 1.5 m stretch of that hallway, so two crates routinely span
+it end to end — e.g. seed 2002: crate at y=+0.21 blocks [-0.36, 0.78], crate at y=-0.40 blocks
+[-0.97, 0.17]. Union covers the corridor; A* correctly reports no path.
+
+Verified by holding everything else fixed and varying only the sampler env on one seed:
+
+| sampler | prop spread | expert |
+|---|---|---|
+| v3 (2.0-7.0 m, 3 fillers) | 2.9-6.4 m | success, path 2.81 m |
+| v4 (2.0-3.5 m, 1 filler) | 2.0-3.3 m | **A\* found no path** |
+
+**Decision: corridor is dropped from v4.** The horizon hypothesis is testable on open_ground +
+parking_lot, and keeping corridor would train on a *selection-biased* subset — only the layouts
+that happen not to block. Corridor returns in v5 with a scene-specific distance range.
+
+**Two logging bugs found here, both of which hid the diagnosis for hours and are now fixed:**
+
+1. `run_episode.py` took `exp.stdout.strip().splitlines()[-1]` as the verdict. `ros2 run` appends
+   `[ros2run]: Process exited with failure 1` to **stdout** whenever the child exits non-zero,
+   which the expert does on every unsuccessful episode. So every real verdict was overwritten with
+   `expert crashed: ` (stderr being empty), and 133 genuine `success:false` results were
+   indistinguishable from crashes. Now scans for the last JSON-shaped line.
+2. `batch_datagen.sh` / `regen_seeds.sh` piped `| tail -1`, reproducing the same error in the batch
+   log. Now `| grep -oE "\{.*\}" | tail -1`.
+
+Consequence for process: **a verdict field that can be silently replaced by a wrapper's error text
+is worse than no verdict**, because it looks like data. The first cleanup pass classified these 133
+as "transient, retry will help" on the strength of that fake signature, and the retry produced 1/26
+before the contradiction surfaced.

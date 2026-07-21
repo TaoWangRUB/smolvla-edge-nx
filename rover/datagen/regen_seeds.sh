@@ -63,7 +63,7 @@ for scene in $(awk '{print $1}' "$LIST" | sort -u); do
     # leftover frames/ would mix old and new renders.
     rm -rf "$OUT_ROOT/${scene}_seed${seed}"
     out=$(timeout 240 ros2 run rover_expert run_episode.py \
-          --scene "$scene" --seed "$((10#$seed))" --out-root "$OUT_ROOT" 2>/dev/null | tail -1)
+          --scene "$scene" --seed "$((10#$seed))" --out-root "$OUT_ROOT" 2>/dev/null | grep -oE "\{.*\}" | tail -1)
     echo "EPISODE_DONE $scene $seed $out" >> "$LOG"
   done
 done

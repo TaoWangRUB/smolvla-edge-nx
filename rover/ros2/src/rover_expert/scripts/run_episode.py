@@ -63,11 +63,26 @@ def main():
     except subprocess.TimeoutExpired:
         os.killpg(os.getpgid(rec.pid), signal.SIGKILL)
 
-    verdict_line = exp.stdout.strip().splitlines()[-1] if exp.stdout.strip() else '{}'
-    try:
-        verdict = json.loads(verdict_line)
-    except json.JSONDecodeError:
-        verdict = {'success': False, 'reason': f'expert crashed: {exp.stderr[-300:]}'}
+    # Scan for the verdict rather than taking the LAST line: `ros2 run` appends
+    # "[ros2run]: Process exited with failure 1" to stdout whenever the child
+    # exits non-zero, which the expert does on every unsuccessful episode.
+    # Taking the last line therefore replaced every real verdict with
+    # "expert crashed: " (stderr is empty), hiding the actual reason -- e.g.
+    # "A* found no path" -- from both the episode.json and the batch log.
+    verdict = None
+    for line in reversed(exp.stdout.strip().splitlines()):
+        line = line.strip()
+        if line.startswith('{') and line.endswith('}'):
+            try:
+                verdict = json.loads(line)
+                break
+            except json.JSONDecodeError:
+                continue
+    if verdict is None:
+        verdict = {'success': False,
+                   'reason': f'no verdict; rc={exp.returncode} '
+                             f'stderr={exp.stderr[-200:]} '
+                             f'stdout={exp.stdout[-200:]}'}
 
     n_frames = len([f for f in os.listdir(os.path.join(ep_dir, 'frames'))
                     if f.endswith('.jpg')]) if os.path.isdir(
