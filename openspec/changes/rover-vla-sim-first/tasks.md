@@ -337,6 +337,25 @@ purchase is gated behind M2 (except camera *selection*, which is an M0 task by d
 
 - [ ] 5.1 Mission layer: SLAM + global planner emitting sub-goals through the instruction
       interface only (0.1–1 Hz); beyond-line-of-sight goals.
+      **PULLED FORWARD 2026-07-21 — this is the fix for the M1 failure, not an M4 extension.**
+      M1 diagnosis (§2.8) found the policy is *memoryless*: `n_obs_steps=1`, and SmolVLA's
+      modeling code **never reads that field at all** (verified — it appears only as a config
+      default), so frame history is unavailable without model surgery. Its whole input is one
+      frame, so **a goal outside the ~100° FOV is unrecoverable** — exactly the
+      "beyond-line-of-sight goals" this task names. Goal persistence belongs in map/state, per
+      D3, not in policy weights.
+      *Scaffold done*: `rover_runtime/goal_memory_node.py` stores the goal in the **odom frame**
+      and republishes its body-frame range/bearing as the rover moves, so it stays correct when
+      the goal leaves view. It also emits the **policy's own `/waypoint_chunk` format**, so the
+      existing tracker drives to a remembered goal with no other changes — demonstrating the
+      full architecture (ground once → remember in odom → chunk → tracker) and letting the
+      mission layer stand in for the policy on the "go to a known goal" leg. Grounding modules
+      speak body frame (`/goal_memory/set_relative`, e.g. "red crate 3 m ahead, 20° left");
+      the node converts once and remembers. Transforms unit-tested offline
+      (`rover/eval_results/test_goal_memory.py`, 19 checks) — including the decisive case:
+      goal behind the rover, outside the FOV, range still exact and bearing pointing back.
+      *Remaining*: the acquisition path (what supplies the goal — a detector, a slow VLM, or the
+      policy at first sight) and an in-sim integration test once the v4 datagen releases the sim.
 - [ ] 5.2 Rear camera logging + reversing/parking tasks (adds heading/signed-velocity channel
       per design D2's scope rule).
 - [ ] 5.3 Baseline comparison: end-to-end control-output policy vs the waypoint architecture
