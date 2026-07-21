@@ -220,25 +220,48 @@ policy sees only camera + state; privileged geometry stays in the referee.
 M1 exit ([tasks.md §2.8](../openspec/changes/rover-vla-sim-first/tasks.md)): above-threshold
 success in training-like scenes + above-chance swap.
 
-### M1 results so far + the grounding diagnosis
+### M1 results + the grounding diagnosis
 
-| Model | success | swap | note |
-|---|---|---|---|
-| stage1_v2 (frozen backbone) | 5/10 | 2/8 | best; swap ≈ chance |
-| stage1b_v2 (full vision unfreeze) | 2/10 | 0/8 | **regressed** — full unfreeze ≠ design's LoRA |
+**Status: the M1 gate is open — navigation works, colour grounding does not.** The policy
+drives competently and grounds *shape*, but ignores the *colour* word: it steers to a fixed
+salient object regardless of the instruction.
 
-The gate failed on grounding (swap ≈ chance). An **offline grounding probe**
-([`rover/eval_results/grounding_probe.py`](eval_results/grounding_probe.py)) localized it:
-the policy grounds **shape** (directional accuracy 0.71) but **not color** (swap-flip 0.10,
-below chance) — it steers to a fixed salient object regardless of the color word. Root cause
-was a **data confound**, not model capacity: the sampler placed the goal in the camera cone
-while distractors scattered uniformly, so "drive to the object ahead" was a winning shortcut.
-Fixed in `scene_manager.sample()` (all props in-cone, equal centrality → color is required).
-Full writeup: [`rover/eval_results/grounding_diagnosis.md`](eval_results/grounding_diagnosis.md).
-**Next:** regenerate → `local/rover_vla_v3` → retrain frozen backbone (Colab) → re-run swap.
-If swap stays flat, the pre-committed escape valve is vision-encoder **LoRA** — low-rank and
-constrained (the full unfreeze that regressed was *not* that; LoRA keeps the language model and
-the base SigLIP weights frozen).
+| model | data | trained | success | swap | probe directional | probe colour swap-flip |
+|---|---|---|---|---|---|---|
+| stage1_v2 | v2 (confounded) | frozen backbone | 5/10 | 2/8 | 0.62 | 0.27 |
+| stage1b_v2 | v2 | **full** vision unfreeze | 2/10 | 0/8 | — | — (regressed) |
+| stage1_v3 | v3 (fixed) | frozen backbone | 3/10 * | 0/9 * | 0.71 | 0.18 |
+| stage1c_v3 | v3 | top-2 vision layers | 3/10 | 0/9 | **0.75** | **0.05** |
+
+\* v3 closed-loop numbers are on *harder* scenes (the fixed sampler clusters props), so they are
+not comparable to v2's. **The probe columns are the fair comparison** — same frames, all models.
+Chance for swap-flip is 0.25.
+
+**Four interventions have failed to move colour grounding**, which rules out the two obvious
+suspects:
+1. **Data confound fix** — the sampler *did* have a real saliency shortcut (goal always most
+   central; fixed so all props share the visible cone). Removing it improved shape grounding
+   (0.62 → 0.71) but left colour at chance. **Necessary, but not the cause.**
+2. **Frozen backbone** — colour at chance (0.18).
+3. **Full vision unfreeze** — regressed badly; scrambled the pretrained features.
+4. **Constrained top-2 vision adaptation** — produced the *best navigator* (directional 0.75)
+   and the *worst* colour-grounder (swap-flip 0.05, below chance). Adapting vision made it steer
+   to its preferred object *more* confidently while still ignoring the word.
+
+**Leading hypothesis: the truncated language model.** SigLIP demonstrably encodes colour, so the
+missing step is *binding* the colour word to an object — a cross-modal attention operation that
+happens inside the LM. SmolVLA truncates the LM to the **first 16 of 32 layers**
+(`num_vlm_layers=16`; `text_model.layers = text_model.layers[:16]`), so if fine attribute binding
+lives in the discarded upper half, no amount of vision adaptation can recover it.
+
+**Next experiment (priority):** raise `num_vlm_layers` 16 → 32 and train from base —
+`MODE='C'` in [`train_colab.ipynb`](train_colab.ipynb) (needs A100 VRAM; the action expert
+resizes to match, so it is a from-base run, not a warm start). If swap lifts, the truncation was
+the cause. If it is flat too, the cheap levers are exhausted and the escalation is design D5
+contingency 4 (Qwen2.5-VL + diffusion head).
+
+Full writeup and per-episode logs:
+[`rover/eval_results/grounding_diagnosis.md`](eval_results/grounding_diagnosis.md).
 
 ## Demos
 
