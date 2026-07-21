@@ -7,6 +7,7 @@ install(
   PROGRAMS
     scripts/tracker_node.py
     scripts/chunk_client_node.py
+    scripts/goal_memory_node.py
   DESTINATION lib/${PROJECT_NAME}
 )
 
