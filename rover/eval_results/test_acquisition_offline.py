@@ -63,6 +63,7 @@ def true_body_goal(cfg, idx=None):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('--raw-root', default='rover/data/raw_v4')
+    ap.add_argument('--scene', default='', help='restrict to one scene family')
     ap.add_argument('--n', type=int, default=20)
     ap.add_argument('--model', default='google/owlv2-base-patch16-ensemble')
     ap.add_argument('--thresh', type=float, default=0.08)
@@ -88,7 +89,7 @@ def main():
     model = AutoModelForZeroShotObjectDetection.from_pretrained(args.model).eval().to(dev)
     print(f'detector: {args.model} on {dev}')
 
-    eps = [d for d in sorted(glob.glob(os.path.join(args.raw_root, '*')))
+    eps = [d for d in sorted(glob.glob(os.path.join(args.raw_root, args.scene + '*')))
            if os.path.exists(os.path.join(d, 'scene_config.json'))][:args.n]
 
     ok_detect = 0

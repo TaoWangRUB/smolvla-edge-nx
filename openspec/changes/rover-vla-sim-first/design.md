@@ -372,3 +372,33 @@ Fallbacks if OWLv2 does not fit, in preference order: (1) distil OWLv2 into a sm
 our own recorded episodes (`scene_config.json` gives exact supervision); (2) run acquisition once
 off-board at mission start; (3) closed-vocabulary colour+shape segmentation — trivially fast and
 near-perfect in sim, but abandons open-vocabulary generality and would not survive sim2real.
+
+### D9 validation — corrected across scene families (2026-07-21)
+
+The 98% acquisition figure above was measured on `open_ground` **only** (the first 59 recorded
+episodes are all one family). Re-run once `corridor` episodes existed:
+
+| scene family | detected | **selects commanded prop** | position err (median / p90) | inside 0.6 m ring |
+|---|---|---|---|---|
+| `open_ground` | 59/59 | 58/59 (98%) | 0.13 m / 0.35 m | 58/59 |
+| `corridor` | 55/60 | 49/55 (**89%**) | 0.22 m / 0.45 m | 51/55 |
+| **combined** | 114/119 | **107/114 (94%)** | — | 109/114 |
+
+**The honest headline is 94%, not 98%.** Corridor is harder on both axes: walls and clutter give
+the detector more to confuse the target with, and median position error nearly doubles.
+
+Failure decomposition for corridor: 55 detected, 51 inside the goal ring, 49 nearest-to-correct.
+So ~4 are projection/range error and ~6 are the detector locking onto the *wrong object* — the
+dominant failure is grounding, not geometry. That matters for where effort goes: improving the
+ground-plane model would buy little; disambiguating among similar props would buy more.
+
+Calibration re-fit on corridor prefers `cam_height` **0.18 m** vs open_ground's 0.20 m. The
+module keeps 0.20 (it matches the URDF derivation, and the 0.02 m difference is well inside the
+goal ring); the discrepancy is logged as a small unexplained bias, not tuned away per-scene.
+
+`parking_lot` is still ungenerated and **unvalidated** — it has bay lines and the ground-slab
+randomisation is skipped there, so it is the most likely family to break the flat-ground
+assumption. Re-run `test_acquisition_offline.py --scene parking_lot` when datagen reaches it.
+
+Even at 94%, this remains far above the policy it replaces (≈ chance goal selection, 2-3/10
+success), so the D9 decision stands.
