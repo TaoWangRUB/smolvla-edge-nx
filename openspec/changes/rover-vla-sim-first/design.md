@@ -230,3 +230,61 @@ subsystem upgrades around a nearly invariant policy contract:
   M2 evaluation, not speculation.
 - Rear camera + reversing scope: log rear RGB in sim from M2 if parking tasks are wanted in
   M4; otherwise omit.
+
+## D9 — Goal memory + acquisition: split grounding from control [added 2026-07-21]
+
+**Context (what M1 measured).** Five interventions failed to lift the swap test above chance —
+data-confound fix, frozen backbone, full vision unfreeze, constrained vision adaptation, and an
+un-truncated 32-layer LM. Trace analysis then showed *why the metric could not move*: the policy
+approaches **some** prop precisely (0.32–0.60 m in 8/10 runs) but **never heads toward the
+commanded one**, and when the target is far it goes to the **nearest** prop in 4/5 cases. The
+expert scores 10/10 on the same scenes. The earlier "colour binding is broken" reading was
+therefore **under-determined** — a proximity-driven policy and a colour-blind one produce
+identical swap scores.
+
+**Root cause.** SmolVLA here is a *local, memoryless* controller doing *long-horizon goal
+selection*: `n_obs_steps=1` (and SmolVLA's modeling code never reads that field at all, so frame
+history is unavailable without model surgery), chunk horizon = K·Δt = 2.5 s ≈ **1.25 m**, against
+goals **2–7 m** away. Once the goal leaves the ~100° FOV **the input contains no information
+about it**. D3 already assigned goal persistence to the mission loop; deferring that loop to
+M4-optional left the policy doing the mission layer's job.
+
+**Decision.** Persist the goal in **map/state, not policy weights**, and split the loops as D3
+intended:
+
+1. **Acquisition (slow, ~0.1–1 Hz)** — an **open-vocabulary detector** grounds the instruction to
+   a bounding box: OWL-ViT via **NanoOWL** (TensorRT-optimised for Jetson; lowest measured edge
+   latency) as the deployment target, Grounding DINO for accuracy or YOLO-World for throughput as
+   alternatives. Zero-shot, no training, and it emits *spatial* output rather than text to parse.
+2. **Geometry** — bbox → body-frame position. On hardware the **D435i depth** (already owned)
+   gives the point directly. In sim there is no depth on the VLA camera, so **ground-plane
+   projection** is used instead: camera height 0.15 m, pitch 0, HFOV 100°, 1280×800, props resting
+   on the ground ⇒ ray-cast the bbox *bottom edge* to the ground plane. Accurate enough at 2–3 m.
+3. **Memory** — `rover_runtime/goal_memory_node.py` stores the goal in the **odom frame** and
+   republishes body-frame range/bearing as the rover moves, so it stays correct out of view. It
+   emits the policy's own `/waypoint_chunk` format so the existing tracker consumes it unchanged.
+4. **Control (fast, 50 Hz)** — the existing Pure-Pursuit tracker, unchanged.
+
+**Rejected, with reasons.**
+- *Qwen2.5-VL + diffusion head as the policy backbone (D5 contingency 4)* — breaks deployment.
+  Published Jetson Xavier deployment of Qwen2.5-VL-3B: **12.1 GB peak, 28.5 s inference**; the
+  Xavier NX has 8 GB. Even AGX Orin users report very low token rates. A grounding model belongs
+  in the *slow* loop, where NanoOWL fits and a 3B VLM does not.
+- *Frame history (`n_obs_steps>1`)* — unavailable; SmolVLA ignores the field.
+- *Semantic-map methods (VLMaps, VLFM)* — they solve a **harder** problem (goal not visible,
+  frontier exploration). D4 guarantees the goal is visible at episode start, so one-shot grounding
+  suffices. Deferred to the M4 beyond-line-of-sight case.
+
+**Deployment check (measured, so the decision stays honest).** Un-truncating the LM costs
+450M → **706M** params and 220 → **383 ms** on the Titan X (fp32), extrapolating to ~**405 ms**
+(2.5 chunks/s) on the NX versus the measured 233 ms (4.3 chunks/s) baseline — degraded but still
+~6× replan overlap against the 2.5 s chunk, and ~1.4 GB at fp16 on an 8 GB board. So the deep-LM
+variant remains deployable; the 3B VLM does not.
+
+**Consequence.** The VLA's role narrows to **local reactive control**; goal selection moves to the
+mission layer. This is the dual-system split design §10 already anticipated (DriveVLM/EMMA
+lineage), arrived at empirically rather than by analogy.
+
+**Validation order.** (a) ground-plane projection + unit tests; (b) **privileged-goal integration
+test** (`/goal_memory/set_odom`) — isolates memory+tracker before adding detector error, and is
+the "just tell it the goal position" fallback; (c) swap in the detector for real acquisition.
