@@ -1,0 +1,65 @@
+diff --git a/rover/ros2/src/rover_sim/scripts/scene_manager.py b/rover/ros2/src/rover_sim/scripts/scene_manager.py
+index 2bdabd4..c0a1a5d 100755
+--- a/rover/ros2/src/rover_sim/scripts/scene_manager.py
++++ b/rover/ros2/src/rover_sim/scripts/scene_manager.py
+@@ -63,6 +63,12 @@ CAM_HALF_FOV = math.radians(50.0)
+ DIST_MIN = float(os.environ.get('ROVER_DIST_MIN', '2.0'))
+ DIST_MAX = float(os.environ.get('ROVER_DIST_MAX', '7.0'))
+ N_FILLER_MAX = int(os.environ.get('ROVER_FILLERS', '3'))
++# Fraction of props placed in the OUTER bearing band (0.55-0.95 of half-FOV),
++# i.e. far left/right rather than ahead. Applies to EVERY prop, goal included:
++# stratifying only the goal would hand the policy a new "drive to the most
++# peripheral object" shortcut, the mirror image of the centrality shortcut
++# removed on 2026-07-20.
++BEARING_OUTER_FRAC = float(os.environ.get('ROVER_BEARING_OUTER', '0.4'))
+ 
+ 
+ @dataclasses.dataclass
+@@ -105,14 +111,39 @@ def sample(scene: str, seed: int) -> EpisodeConfig:
+     # 2026-07-20: goal-in-cone / distractors-uniform gave a saliency shortcut,
+     # swap flip 0.10 < chance). Cone: +-0.85*HFOV, 2-7 m, min separation.
+     def place(existing, min_sep=0.7):
+-        for _ in range(400):
+-            dist = rng.uniform(DIST_MIN, min(DIST_MAX, x1))
+-            bearing = spawn[2] + rng.uniform(-CAM_HALF_FOV * 0.85,
+-                                             CAM_HALF_FOV * 0.85)
+-            x = spawn[0] + dist * math.cos(bearing)
+-            y = spawn[1] + dist * math.sin(bearing)
+-            if not (x0 <= x <= x1 and y0 <= y <= y1):
+-                continue
++        for attempt in range(400):
++            # Band-stratified bearing. Sampling bearing uniformly and rejecting
++            # on the scene rectangle biases HARD toward centre: wide bearings
++            # only fit at short range, so they get rejected more often. Measured
++            # on v4 (uniform +-42.5 deg): 45% of goals landed within 10 deg and
++            # only 15% beyond 30 deg. A centre-clustered goal lets the policy
++            # succeed by driving roughly straight and never forces the turn that
++            # takes the goal out of the FOV -- exactly the case goal memory
++            # exists for.
++            #
++            # So draw the BAND first, then a distance that fits it.
++            # Narrow scenes cannot host a peripheral goal at all: `corridor` is
++            # 1.2 m wide, so 30 deg at 2 m already exits the hallway. After half
++            # the attempts, drop the stratification and take whatever fits --
++            # a geometrically impossible band must not turn into a placement
++            # failure (measured: 24/400 in corridor before this fallback).
++            if attempt >= 200:
++                lo, hi = 0.0, 0.95
++            elif rng.random() < BEARING_OUTER_FRAC:
++                lo, hi = 0.55, 0.95        # periphery
++            else:
++                lo, hi = 0.0, 0.55         # central
++            mag = rng.uniform(lo, hi) * CAM_HALF_FOV
++            bearing = spawn[2] + (mag if rng.random() < 0.5 else -mag)
++
++            for _ in range(8):             # a distance this bearing can fit in
++                dist = rng.uniform(DIST_MIN, min(DIST_MAX, x1))
++                x = spawn[0] + dist * math.cos(bearing)
++                y = spawn[1] + dist * math.sin(bearing)
++                if x0 <= x <= x1 and y0 <= y <= y1:
++                    break
++            else:
++                continue                   # bearing cannot fit; redraw it
+             if math.hypot(x - spawn[0], y - spawn[1]) < 1.2:
+                 continue
+             if all(math.hypot(x - p.x, y - p.y) >= min_sep for p in existing):
