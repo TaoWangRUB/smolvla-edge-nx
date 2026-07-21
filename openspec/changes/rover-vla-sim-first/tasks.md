@@ -392,3 +392,33 @@ purchase is gated behind M2 (except camera *selection*, which is an M0 task by d
 - [ ] 5.5 **Measure OWLv2 on the Xavier NX** (TensorRT/fp16 latency + VRAM). Blocking risk
       for D9: A2000-fp32 is 3190 ms and the NX extrapolation spans ~1-10 s. Acquisition is
       0.1-1 Hz (D3) so seconds are tolerable, but the number must be real before M4.
+
+- [ ] 2.9 **v4 horizon test — experimental design** (do not skip the controls)
+
+      Question: does shortening the goal range restore language grounding, or was
+      M1's failure caused by something else?
+
+      **Held fixed** (matching `stage1_v3` exactly): 10000 steps, batch 8, lr 1e-4,
+      `num_vlm_layers=16`, `freeze_vision_encoder=true`, `chunk_size=1`, frozen backbone.
+      **Varied**: goal range only (2.0-7.0 m -> 2.0-3.5 m).
+
+      Two confounds, both fixed BEFORE the run rather than caveated after:
+
+      1. *Dataset size.* Dropping corridor plus shorter episodes left v4 at ~374 episodes /
+         ~37k frames vs v3's 520 / 71.5k - half the data, and 2.2 epochs vs 1.1 at the same
+         step count. A weak v4 would then be unattributable (horizon vs. less data).
+         Fixed by 166 extension seeds -> ~520 episodes.
+      2. *Eval distribution.* v4 must be evaluated on v4-style scenes (2.0-3.5 m), but then
+         a better v4 score could just mean short scenes are easier to evaluate on.
+         **Control: run the existing `stage1_v3` checkpoint on the SAME v4-style eval
+         scenes.** Costs one extra eval run and is the only thing that separates
+         "short-horizon training helps" from "short-horizon eval is easier".
+
+      | outcome | reading |
+      |---|---|
+      | v4 swap-flip >> v3-on-short-eval | horizon was the cause; hypothesis confirmed |
+      | v4 ~= v3-on-short-eval, both high | the eval got easier; training changed nothing |
+      | v4 success up, swap-flip ~ chance (0.25) | the saliency shortcut at close range - a NEGATIVE result despite the better success number |
+      | v4 swap-flip ~ chance, success flat | horizon was not the cause; grounding fails for another reason |
+
+      Baseline to beat: `stage1_v3` swap-flip 0.18, directional 0.71, 2-3/10 closed-loop.
