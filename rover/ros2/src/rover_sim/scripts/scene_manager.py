@@ -27,6 +27,7 @@ import argparse
 import dataclasses
 import json
 import math
+import os
 import random
 import subprocess
 import sys
@@ -52,6 +53,16 @@ SCENE_BOUNDS = {
     'props_ground': (2.0, 8.0, -3.0, 3.0),
 }
 CAM_HALF_FOV = math.radians(50.0)
+
+# Goal/prop placement range, env-overridable so past dataset versions stay
+# reproducible. v2/v3 used 2.0-7.0 m; the short-horizon variant (v4) brings
+# every prop inside ~2 chunk-reaches (chunk = K*DT*cruise = 1.25 m) so the
+# commanded target stays in the camera FOV for the whole approach — the
+# policy is memoryless (n_obs_steps=1), so a goal that leaves the view is
+# unrecoverable. Equalising range also removes the distance-bias confound.
+DIST_MIN = float(os.environ.get('ROVER_DIST_MIN', '2.0'))
+DIST_MAX = float(os.environ.get('ROVER_DIST_MAX', '7.0'))
+N_FILLER_MAX = int(os.environ.get('ROVER_FILLERS', '3'))
 
 
 @dataclasses.dataclass
@@ -95,7 +106,7 @@ def sample(scene: str, seed: int) -> EpisodeConfig:
     # swap flip 0.10 < chance). Cone: +-0.85*HFOV, 2-7 m, min separation.
     def place(existing, min_sep=0.7):
         for _ in range(400):
-            dist = rng.uniform(2.0, min(7.0, x1))
+            dist = rng.uniform(DIST_MIN, min(DIST_MAX, x1))
             bearing = spawn[2] + rng.uniform(-CAM_HALF_FOV * 0.85,
                                              CAM_HALF_FOV * 0.85)
             x = spawn[0] + dist * math.cos(bearing)
@@ -131,7 +142,7 @@ def sample(scene: str, seed: int) -> EpisodeConfig:
 
     # Filler clutter — never an exact (shape, color) duplicate of the goal,
     # or the instruction stops identifying a unique target.
-    for i in range(3, 3 + rng.randint(1, 3)):
+    for i in range(3, 3 + rng.randint(max(0, N_FILLER_MAX - 2), N_FILLER_MAX)):
         x, y = place(props)
         while True:
             shape, color = rng.choice(list(SHAPES)), rng.choice(list(COLORS))

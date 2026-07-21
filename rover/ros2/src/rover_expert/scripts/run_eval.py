@@ -19,6 +19,7 @@ Verdicts stream as JSON lines; a summary prints at the end.
 
 import argparse
 import json
+import os
 import math
 import signal
 import subprocess
@@ -55,12 +56,22 @@ class Referee(Node):
         self.t0 = None
         self.min_clear = 1e9
         self.pose = None
+        self.trace = []          # (t, x, y, yaw) for post-hoc visualisation
         self.create_subscription(Odometry, '/ackermann/gt_odom', self.on_odom, 50)
         self.create_timer(0.05, self.tick)
 
     def on_odom(self, m):
         p = m.pose.pose.position
         self.pose = (p.x, p.y)
+        q = m.pose.pose.orientation
+        self.trace.append({
+            't': m.header.stamp.sec + m.header.stamp.nanosec * 1e-9,
+            'x': round(p.x, 5), 'y': round(p.y, 5),
+            'yaw': round(math.atan2(2.0 * (q.w * q.z + q.x * q.y),
+                                    1.0 - 2.0 * (q.y * q.y + q.z * q.z)), 5),
+            'vx': round(m.twist.twist.linear.x, 5),
+            'vy': round(m.twist.twist.linear.y, 5),
+        })
         for prop in self.cfg['props']:
             c = (math.hypot(p.x - prop['x'], p.y - prop['y'])
                  - PROP_RADIUS[prop['shape']] - ROVER_RADIUS)
@@ -128,7 +139,7 @@ def instruction_for(prop):
 
 
 def run_one(scene, seed, server_host, server_port, target_idx=0,
-            instruction=None, reset_scene=True):
+            instruction=None, reset_scene=True, trace_dir=None):
     cfg_path = f'/tmp/eval_cfg_{scene}_{seed}.json'
     if reset_scene:
         r = subprocess.run(['ros2', 'run', 'rover_sim', 'scene_manager.py',
@@ -164,6 +175,20 @@ def run_one(scene, seed, server_host, server_port, target_idx=0,
     res = dict(ref.result)
     res.update({'scene': scene, 'seed': seed, 'instruction': task,
                 'target': cfg['props'][target_idx]['name']})
+
+    # Optional trace dump: same layout a raw episode uses, so
+    # rover/eval_results/scene_overview_gif.py can render it directly.
+    if trace_dir:
+        import shutil
+        d = os.path.join(trace_dir, f'{scene}_seed{seed:05d}_t{target_idx}')
+        os.makedirs(d, exist_ok=True)
+        shutil.copy(cfg_path, os.path.join(d, 'scene_config.json'))
+        with open(os.path.join(d, 'gt_pose.jsonl'), 'w') as f:
+            for row in ref.trace:
+                f.write(json.dumps(row) + '\n')
+        with open(os.path.join(d, 'episode.json'), 'w') as f:
+            json.dump({'config': cfg, 'verdict': res,
+                       'success': res['success']}, f, indent=2)
     return res, cfg
 
 
@@ -186,13 +211,15 @@ def main():
     ap.add_argument('--swap', action='store_true')
     ap.add_argument('--server-host', default='127.0.0.1')
     ap.add_argument('--server-port', type=int, default=8790)
+    ap.add_argument('--trace-dir', help='dump per-episode pose traces for GIF rendering')
     args = ap.parse_args()
 
     n_ok = 0
     swap_pairs = swap_ok = 0
     for i in range(args.episodes):
         seed = args.seed0 + i
-        res, cfg = run_one(args.scene, seed, args.server_host, args.server_port)
+        res, cfg = run_one(args.scene, seed, args.server_host, args.server_port,
+                           trace_dir=args.trace_dir)
         print(json.dumps(res), flush=True)
         n_ok += bool(res['success'])
         if args.swap:
@@ -200,7 +227,8 @@ def main():
             if alt is None:
                 continue
             res2, _ = run_one(args.scene, seed, args.server_host,
-                              args.server_port, target_idx=alt)
+                              args.server_port, target_idx=alt,
+                              trace_dir=args.trace_dir)
             print(json.dumps(res2), flush=True)
             swap_pairs += 1
             a_ok = res['success'] and res['nearest_prop'] == res['target']

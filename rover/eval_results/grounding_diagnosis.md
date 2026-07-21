@@ -106,3 +106,63 @@ Raise `num_vlm_layers` (16 -> 32) and retrain from base — `MODE='C'` in
 from-base run, not a warm start). If swap lifts, the truncation was the cause. If it does not,
 the cheap levers are exhausted and the honest escalation is D5 contingency 4 (Qwen2.5-VL +
 diffusion head).
+
+## Update 2026-07-21 (later still) — REFRAMING: the colour conclusion was under-determined
+
+### Mode C (deeper LM) result
+`stage1d_deeplm` — `num_vlm_layers` 16→32 (model 450M→706M; the expert scales with the LM),
+10k steps @ batch 32 on Colab A100, `rover_vla_v3`. Probe on identical `raw_v3` frames:
+
+| model | LM layers | directional | colour swap-flip | bearing change |
+|---|---|---|---|---|
+| stage1_v3 | 16 | 0.71 | 0.18 | 15.3 deg |
+| stage1c_v3 (vision adapted) | 16 | 0.75 | 0.05 | 14.8 deg |
+| stage1d_deeplm | **32** | 0.71 | **0.27** | **22.3 deg** |
+
+Best swap-flip so far and a ~50% jump in instruction sensitivity — but 0.27 vs chance 0.25 on
+22 pairs is statistically indistinguishable. A faint signal that LM depth matters; **not a fix**.
+
+### What the eval traces actually show
+Per-episode analysis of the 10 eval traces (`rover/eval_traces/`):
+- In **8/10 the rover ends 0.32–0.60 m from *some* prop** — a precise approach, so low-level
+  path-following works.
+- But `min_dist_to_commanded_ever ~= final_dist_to_commanded`: it **never heads toward the
+  commanded target** — it commits elsewhere immediately.
+- **Distance bias**: when the commanded target is far (distance rank 4–6 from spawn), the rover
+  went to the *nearest* prop in **4 of 5** cases. When commanded is near (rank 2–3), it ends in
+  the right neighbourhood.
+- The **expert scores 10/10 on the identical seeds**, so every scene is solvable.
+
+### Correction to the earlier conclusion
+The previous entries concluded "colour-word binding is broken / the vision encoder is not the
+bottleneck". That conclusion is **under-determined**: a policy dominated by proximity/saliency
+produces the *same* swap score as one that cannot perceive colour. The swap test cannot separate
+them while the commanded target and distractors sit at different ranges.
+
+### Structural diagnosis (the likely root cause)
+SmolVLA here is a **local, memoryless visuomotor policy** being asked to do **long-horizon goal
+selection**:
+1. `n_obs_steps=1` — one current frame, no temporal state. **If the goal leaves the ~100 deg FOV
+   there is zero information about where it is**; the policy latches onto whatever is visible.
+2. Chunk horizon = K*DT = 2.5 s ~= **1.25 m** at 0.5 m/s, against goals **2–7 m** away — up to
+   5.6 independent replans must agree on a destination, with no memory to enforce that.
+   This is the mechanism behind both observed symptoms: **wandering** and **serpentine driving**.
+3. Design D3 specifies a **mission loop (0.1–1 Hz)** for global goal selection, deferred as
+   M4-optional — so the policy was made to do the mission layer's job as well as its own.
+
+### Experiment in flight: short horizon (`rover_vla_v4`)
+Sampler placement range 2.0–7.0 m -> **2.0–3.5 m** (goal mean 2.80 m ~= 2.2 chunk-reaches),
+1 filler; measured within-scene range spread 1.27 -> **0.88 m**. This keeps the goal in the FOV
+for the whole approach *and* equalises range, so the swap test becomes a clean colour measure
+for the first time. If success and swap both lift, the failure was **horizon/visibility**, not
+colour perception.
+
+### Long-term (independent of the above): the policy needs goal memory
+Shortening the horizon *avoids* the memoryless limitation rather than fixing it. Options, in
+cost order:
+1. `n_obs_steps > 1` — short frame history; cheap, but won't cover a target out of view for seconds.
+2. **Mission layer (D3)** holding the goal's location in the odom frame (the EKF already tracks
+   it) and feeding the fast policy a persistent target — goal memory belongs in map/state, not
+   in policy weights.
+3. Explicit goal state in the observation (relative bearing/range once acquired) — i.e. the
+   point-goal interface, now well-motivated rather than redundant.

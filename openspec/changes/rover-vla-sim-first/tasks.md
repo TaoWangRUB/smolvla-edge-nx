@@ -186,15 +186,25 @@ purchase is gated behind M2 (except camera *selection*, which is an M0 task by d
       test above chance. **Escape valve (pre-committed)**: if the swap test fails under the
       fully frozen backbone, pull vision-encoder LoRA forward into M1 (language model stays
       frozen).
-      > **STATUS 2026-07-21 — GATE OPEN. Navigation works; colour grounding does not.**
-      > Probe (fair comparison, identical frames; chance = 0.25):
-      > stage1_v2 0.27 → stage1_v3 0.18 → stage1c_v3 **0.05**, directional 0.62 → 0.71 → 0.75.
-      > **Four interventions have failed to move colour grounding** — data-confound fix, frozen
-      > backbone, full vision unfreeze, constrained vision adaptation — so the **vision encoder
-      > is ruled out**. Leading hypothesis: SmolVLA truncates the LM to the first **16 of 32**
-      > layers (`num_vlm_layers`), and colour-word→object binding lives in the discarded upper
-      > half. **Next: `num_vlm_layers` 16→32 from base (Colab `MODE='C'`, needs A100).** If flat,
-      > escalate to D5 contingency 4 (Qwen2.5-VL + diffusion head). Chronological detail below.
+      > **STATUS 2026-07-21 (REFRAMED) — GATE OPEN. Likely a horizon/memory problem, not colour.**
+      > Probe swap-flip (chance 0.25): stage1_v2 0.27 → stage1_v3 0.18 → stage1c_v3 0.05 →
+      > stage1d_deeplm (32 LM layers) **0.27** with instruction-sensitivity up 15°→**22.3°** —
+      > best yet but still ≈ chance, so **five interventions have failed to lift colour grounding**
+      > (data-confound fix, frozen backbone, full vision unfreeze, constrained vision adaptation,
+      > deeper LM).
+      > **Correction:** the earlier "colour binding is broken" conclusion is **under-determined** —
+      > a proximity/saliency-driven policy yields the *same* swap score as a colour-blind one.
+      > Trace analysis: the rover ends **0.32–0.60 m from *some* prop in 8/10** (approach works)
+      > but **never heads toward the commanded target**, and when that target is far (rank 4–6) it
+      > goes to the **nearest** prop in **4/5** cases. Expert = **10/10** on the same seeds.
+      > **Structural root cause:** SmolVLA is a *local, memoryless* policy (`n_obs_steps=1`, chunk
+      > = 2.5 s ≈ **1.25 m**) asked to do long-horizon goal selection to targets **2–7 m** away —
+      > and once the goal leaves the ~100° FOV the input contains *nothing* about it. Design D3's
+      > **mission loop was deferred (M4-optional), so the policy was doing the mission layer's job**.
+      > **In flight:** `rover_vla_v4` with goals at **2.0–3.5 m** (range-equalised) — keeps the goal
+      > in view and removes the distance confound, making the swap test a clean colour measure.
+      > **Long-term:** goal memory — `n_obs_steps>1`, or (better) the D3 mission layer holding the
+      > goal in the odom frame. Full analysis: `rover/eval_results/grounding_diagnosis.md`.
       **GATE NOT PASSED at stage1_v2 (swap 2/8) → escape valve invoked 2026-07-19.**
       Implementation: lerobot has no "vision-trains/LM-frozen" combo
       (`train_expert_only=false` unfreezes the LM too), so the runtime patch that already
