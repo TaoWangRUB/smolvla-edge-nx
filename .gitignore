@@ -57,3 +57,6 @@ data/*.tar.gz
 
 # Vendored Jetson wheels (large binaries; fetch from Jetson Zoo)
 *.whl
+
+# HF model weights (OWLv2 detector, ~2 GB)
+.hf_cache/
