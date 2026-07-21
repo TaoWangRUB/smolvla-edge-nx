@@ -80,7 +80,7 @@ def lerp_yaw(pose_rows, t):
 
 
 def convert(raw_root, out_root, repo_id, fps, include_failures,
-            chunk_k=0, chunk_dt=0.25, use_paraphrase=False):
+            chunk_k=0, chunk_dt=0.25, use_paraphrase=False, scenes=None):
     import cv2
     from lerobot.datasets.lerobot_dataset import LeRobotDataset
 
@@ -120,6 +120,15 @@ def convert(raw_root, out_root, repo_id, fps, include_failures,
 
     eps = sorted(p for p in pathlib.Path(raw_root).iterdir()
                  if (p / 'episode.json').exists())
+    if scenes:
+        # Scene families are not always interchangeable: v4's 2.0-3.5 m range
+        # makes ~half of `corridor` impassable (1.2 m hallway vs a 0.57 m
+        # inflated crate), so its survivors are a selection-biased sample of
+        # only-passable layouts. Filtering here keeps that judgement in the
+        # conversion command rather than in a hand-curated directory.
+        keep = set(scenes)
+        eps = [e for e in eps if e.name.rsplit('_seed', 1)[0] in keep]
+        print(f'scene filter {sorted(keep)}: {len(eps)} episodes')
     n_done = 0
     for ep in eps:
         meta = json.load(open(ep / 'episode.json'))
@@ -177,13 +186,17 @@ def main():
                     help='emit K x (x,y,v) hindsight chunks as the action '
                          '(flat 3K dims); 0 = provisional [v, w]')
     ap.add_argument('--chunk-dt', type=float, default=0.25)
+    ap.add_argument('--scenes', default='',
+                    help='comma-separated scene families to include '
+                         '(default: all present)')
     ap.add_argument('--paraphrase', action='store_true',
                     help='replace canonical instructions with train-pool '
                          'paraphrases (heldout pool stays reserved)')
     args = ap.parse_args()
     convert(args.raw_root, args.out, args.repo_id, args.fps,
             args.include_failures, args.chunk_k, args.chunk_dt,
-            args.paraphrase)
+            args.paraphrase,
+            scenes=[s for s in args.scenes.split(',') if s] or None)
 
 
 if __name__ == '__main__':
