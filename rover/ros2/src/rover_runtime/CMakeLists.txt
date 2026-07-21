@@ -9,6 +9,7 @@ install(
     scripts/chunk_client_node.py
     scripts/goal_memory_node.py
     scripts/goal_projection.py
+    scripts/goal_acquisition_node.py
   DESTINATION lib/${PROJECT_NAME}
 )
 
