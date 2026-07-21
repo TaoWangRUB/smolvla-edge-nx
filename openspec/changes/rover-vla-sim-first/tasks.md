@@ -244,6 +244,25 @@ purchase is gated behind M2 (except camera *selection*, which is an M0 task by d
       `rover/eval_results/eval_stage1_v3_open_ground.log`. Methodology note: keep a fixed eval
       scene set across model versions, or closed-loop success conflates policy quality with scene
       difficulty (observed here).
+      **ESCAPE-VALVE RESULT 2026-07-21 — constrained vision adaptation also failed; bottleneck
+      is the truncated LM, not vision.** `stage1c_v3` (warm-start stage1_v3, unfreeze top-2 of
+      16 vision layers, LM + lower vision frozen, 126M trainable verified pre-launch, 10k steps,
+      loss 0.117; the robust stand-in for LoRA — lerobot/peft was blocked by a `diffusers`
+      peft>=0.17 pin and a factory that reads `--policy.path=<ckpt> --use_peft` as *load an
+      existing adapter*). Probe on identical frames: **directional 0.75 (best of all models) but
+      colour swap-flip 0.05 — below chance 0.25** (stage1_v3 was 0.18, stage1_v2 0.27). Vision
+      adaptation made it a *better navigator and a worse colour-grounder*: it steers to a fixed
+      salient object more confidently, still ignoring the colour word (~15° bearing change).
+      **Four interventions have now failed to move colour grounding** (data-confound fix, frozen
+      backbone, full vision unfreeze, constrained vision adaptation) — so the vision encoder is
+      not the bottleneck. SigLIP encodes colour; the missing step is *binding* the colour word to
+      an object, which happens in the LM — and SmolVLA truncates it to the first **16 of 32**
+      layers (`num_vlm_layers`). **Next (priority): raise `num_vlm_layers` 16→32, from base**
+      (`MODE='C'` in `rover/train_colab.ipynb`; needs A100 VRAM since the expert resizes to
+      match). If that is also flat, escalate to D5 contingency 4 (Qwen2.5-VL + diffusion head).
+      Hardware note: the Titan X eGPU dropped off the Thunderbolt bus mid-run (`nv_pci_remove`,
+      required a reboot), costing one run — checkpoints are now `save_freq=500` and long runs
+      should prefer Colab.
 - [ ] 2.9 Contingency check: if tracking oscillates on policy chunks, switch output to (κ, v)
       per design D2 before touching model capacity.
 
