@@ -378,4 +378,10 @@ purchase is gated behind M2 (except camera *selection*, which is an M0 task by d
       Publish the true goal to `/goal_memory/set_odom`, drive with the tracker, confirm
       out-of-view goals are still reached. This is the user's stated fallback ("just tell it
       the goal position") and isolates memory+tracker before detector error is added.
-- [ ] 5.4 Swap the detector in for real acquisition (D9 step c); port to NanoOWL on the NX.
+- [ ] 5.4 Swap the detector in for real acquisition (D9 step c).
+      **NanoOWL is ruled out** — its `owlvit-base-patch32` backbone gets 22% recall here
+      (39% tiled) vs OWLv2's 100%, and recall is FLAT vs range (29% at 0.5 m), so neither
+      tiling nor approach-and-lock recovers it. Needs an OWLv2-class detector.
+- [ ] 5.5 **Measure OWLv2 on the Xavier NX** (TensorRT/fp16 latency + VRAM). Blocking risk
+      for D9: A2000-fp32 is 3190 ms and the NX extrapolation spans ~1-10 s. Acquisition is
+      0.1-1 Hz (D3) so seconds are tolerable, but the number must be real before M4.
