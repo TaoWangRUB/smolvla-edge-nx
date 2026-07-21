@@ -1,0 +1,22 @@
+# Seeds whose scene cannot be sampled: scene_manager cannot place all props
+# with min_sep=0.7 inside the bounds. Deterministic - never worth retrying.
+# corridor is 1.2 m wide (SCENE_BOUNDS y=-0.6..0.6).
+corridor 02006
+corridor 02018
+corridor 02054
+corridor 02056
+corridor 02058
+corridor 02070
+corridor 02073
+corridor 02079
+corridor 02083
+corridor 02087
+corridor 02092
+corridor 02101
+corridor 02102
+corridor 02116
+corridor 02118
+corridor 02120
+corridor 02122
+corridor 02139
+corridor 02164
