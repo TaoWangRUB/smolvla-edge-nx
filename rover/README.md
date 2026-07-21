@@ -171,13 +171,28 @@ pointing `POLICY_PATH` at `…/checkpoints/last/pretrained_model` instead of the
 - fp32 @ batch 8 ≈ 0.86 s/step; a 10k-step run ≈ 2.5 h.
 
 **Google Colab** — [`rover/train_colab.ipynb`](train_colab.ipynb) (open via
-`colab.research.google.com/github/<owner>/smolvla-edge-nx/blob/feature/rover-vla-sim/rover/train_colab.ipynb`):
-- A100/L4 give bf16 + batch 32–64 (~10× faster than the Titan X); T4/V100 auto-fall back to
-  the fp32 patch at batch 16 (compute-capability detected in the notebook);
-- **datagen and closed-loop eval stay local** — Colab does training only. Flow: regenerate the
-  dataset locally → `tar czf` it → upload to Drive → run the notebook → download the checkpoint
-  tarball → eval locally with `policy_server.py` + `run_eval.py`;
-- streams to the same `rover-vla` wandb project (key via a Colab secret).
+`colab.research.google.com/github/TaoWangRUB/smolvla-edge-nx/blob/feature/rover-vla-sim/rover/train_colab.ipynb`).
+Set `MODE` in the config cell, then Runtime ▸ Run all:
+
+| MODE | experiment | needs |
+|---|---|---|
+| `A` | stage-1 baseline (frozen backbone, expert only) — the stable recipe | dataset |
+| `B` | constrained vision adaptation — warm-start + unfreeze top-K vision layers, LM frozen | dataset + checkpoint |
+| `C` | deeper LM — raise `num_vlm_layers` (SmolVLA truncates to 16 of 32); tests whether that truncation blocks fine colour binding | dataset |
+
+- A100/L4 → bf16 at batch 32–64 (~10× the Titan X); T4/V100 auto-fall back to fp32 at batch 16
+  (compute capability detected in the notebook). Mode C halves the batch (deeper LM costs VRAM).
+- `save_freq=500` by default so a dropped Colab session loses ≤ 1 checkpoint.
+- **datagen and closed-loop eval stay local** — Colab trains only.
+
+**Upload payloads** are built into `rover/colab_upload/` (gitignored) by:
+```bash
+tar czf rover/colab_upload/rover_vla_v3.tar.gz -C rover/data/lerobot rover_vla_v3
+tar czf rover/colab_upload/stage1_v3_pretrained.tar.gz \
+    -C rover/outputs/train/stage1_v3/checkpoints/last pretrained_model
+```
+Upload both to Drive `MyDrive/rover_vla/`. If files were written by the docker containers,
+`sudo chown -R $USER:$USER rover/data rover/outputs` first or tar will hit permission errors.
 
 ## Eval pipeline ([design D6](../openspec/changes/rover-vla-sim-first/design.md), tasks 2.7–2.8)
 
