@@ -364,3 +364,18 @@ purchase is gated behind M2 (except camera *selection*, which is an M0 task by d
       larger; Qwen2.5-VL + diffusion head as the recorded architecture fallback.
 - [ ] 5.5 Record upgrade-path notes (design §10) against actual findings: BEV front-end,
       navigation router, formalized safety envelope.
+
+- [x] 5.2 Acquisition geometry + offline validation — DONE 2026-07-21
+      `rover_runtime/goal_projection.py` (bbox → body frame; ground-plane for the sim's
+      RGB-only camera, depth variant for the D435i) + `eval_results/test_goal_projection.py`
+      (30 checks) + `eval_results/test_acquisition_offline.py` (end-to-end vs ground truth).
+      Measured on 59 recorded v4 episodes: detected 59/59, **selects the commanded prop
+      58/59 (98%)**, position error median 0.13 m / p90 0.35 m, bearing 0.1°, 58/59 inside
+      the 0.6 m ring. Calibrated camera height 0.20 m (data fit and URDF derivation agree).
+      Key gotcha recorded in design.md: query ONE phrase per detector pass — multi-query
+      suppression zeroed 13/39 targets and mimicked a capability limit.
+- [ ] 5.3 Privileged-goal integration test (D9 step b) — needs the sim; blocked on v4 datagen.
+      Publish the true goal to `/goal_memory/set_odom`, drive with the tracker, confirm
+      out-of-view goals are still reached. This is the user's stated fallback ("just tell it
+      the goal position") and isolates memory+tracker before detector error is added.
+- [ ] 5.4 Swap the detector in for real acquisition (D9 step c); port to NanoOWL on the NX.

@@ -26,8 +26,24 @@ import math
 CAM_W = 1280
 CAM_H = 800
 CAM_HFOV = math.radians(100.0)
-CAM_HEIGHT = 0.15      # metres above ground
 CAM_PITCH = 0.0        # radians, positive = tilted down
+
+# Camera height is measured ABOVE GROUND, not above base_link. The URDF mounts
+# the camera 0.15 m above base_link, but base_link itself rides above the floor
+# (nested wheel_diameter/base_elevation offsets), so the URDF number alone
+# under-ranges by ~25%. Calibrated against recorded episodes with known prop
+# positions -- see rover/eval_results/calibrate_projection.py. On hardware,
+# re-run that calibration rather than trusting a tape measure.
+CAM_HEIGHT = 0.20
+
+# The camera sits forward of base_link (wheel_base/2 + 0.10). Projection yields
+# range from the CAMERA; the tracker and the labels use the BODY frame, so this
+# offset must be added back.
+CAM_X_OFFSET = 0.187
+
+# Prop radii (scene_manager.py SHAPES). The bbox bottom edge is where the
+# object's NEAR face meets the ground, but the goal is its CENTRE.
+OBJECT_RADIUS = {'barrel': 0.15, 'ball': 0.15, 'crate': 0.20}
 
 
 def focal_px(width=CAM_W, hfov=CAM_HFOV):
@@ -49,12 +65,17 @@ def pixel_rays(u, v, width=CAM_W, height=CAM_H, hfov=CAM_HFOV):
 
 
 def bbox_to_body_groundplane(bbox, cam_height=CAM_HEIGHT, pitch=CAM_PITCH,
-                             width=CAM_W, height=CAM_H, hfov=CAM_HFOV):
+                             width=CAM_W, height=CAM_H, hfov=CAM_HFOV,
+                             cam_x_offset=CAM_X_OFFSET, object_radius=0.0):
     """(x1, y1, x2, y2) pixels -> (x, y) metres in body frame, or None.
 
     Uses the bottom-centre pixel (object's ground contact). Returns None when
     the ray does not descend (points at or above the horizon), which is the
     correct failure for a box whose base is not visible.
+
+    `object_radius` pushes the result from the object's near face to its centre
+    (look up the class in OBJECT_RADIUS); `cam_x_offset` converts camera-frame
+    range to body-frame range.
     """
     x1, y1, x2, y2 = bbox
     u = 0.5 * (x1 + x2)
@@ -68,7 +89,14 @@ def bbox_to_body_groundplane(bbox, cam_height=CAM_HEIGHT, pitch=CAM_PITCH,
     if dz >= -1e-9:                      # not pointing down -> no ground hit
         return None
     t = cam_height / (-dz)               # scale until the ray reaches z = -cam_height
-    return dx * t, dy * t
+    cx, cy = dx * t, dy * t
+
+    if object_radius:                    # near face -> centre, along the ray
+        n = math.hypot(cx, cy)
+        if n > 1e-6:
+            cx += object_radius * cx / n
+            cy += object_radius * cy / n
+    return cx + cam_x_offset, cy
 
 
 def bbox_to_body_depth(bbox, depth_m, pitch=CAM_PITCH,
