@@ -1,0 +1,68 @@
+{
+  "config": {
+    "seed": 9000,
+    "scene": "open_ground",
+    "sun_elevation_deg": 68.54753616008699,
+    "sun_azimuth_deg": 296.16141053645254,
+    "sun_intensity": 1.0199740273018705,
+    "ground_rgb": [
+      0.4195768332790252,
+      0.7630878931133998,
+      0.5499641025852742
+    ],
+    "spawn": [
+      0.0,
+      -0.0936226650958584,
+      0.028634854405981597
+    ],
+    "props": [
+      {
+        "name": "ep_prop_0",
+        "shape": "barrel",
+        "color": "blue",
+        "x": 6.556648123577306,
+        "y": -0.28302991317219495,
+        "yaw": 2.515328546073329
+      },
+      {
+        "name": "ep_prop_1",
+        "shape": "crate",
+        "color": "blue",
+        "x": 3.6877588588505534,
+        "y": -2.6628372718871005,
+        "yaw": 2.988718020112891
+      },
+      {
+        "name": "ep_prop_2",
+        "shape": "barrel",
+        "color": "green",
+        "x": 2.8858015708977187,
+        "y": 0.18088580506357996,
+        "yaw": 0.6478302357234769
+      },
+      {
+        "name": "ep_prop_3",
+        "shape": "ball",
+        "color": "green",
+        "x": 3.5491151781951786,
+        "y": -0.48349046687356856,
+        "yaw": 2.2390083003669607
+      }
+    ],
+    "goal_index": 0,
+    "instruction": "drive to the blue barrel"
+  },
+  "verdict": {
+    "outcome": "collision",
+    "success": false,
+    "time_s": 7.0,
+    "min_clearance_m": -0.017,
+    "nearest_prop": "ep_prop_3",
+    "dist_to_target": 3.272,
+    "scene": "open_ground",
+    "seed": 9000,
+    "instruction": "drive to the blue barrel",
+    "target": "ep_prop_0"
+  },
+  "success": false
+}

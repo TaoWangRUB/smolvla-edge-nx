@@ -440,3 +440,68 @@ Consequence for process: **a verdict field that can be silently replaced by a wr
 is worse than no verdict**, because it looks like data. The first cleanup pass classified these 133
 as "transient, retry will help" on the strength of that fake signature, and the retry produced 1/26
 before the contradiction surfaced.
+
+## D10 — Policy backbone: goal-conditioned bake-off, decided by reference model [added 2026-07-22]
+
+**Context.** D9 moved goal *selection* to the acquisition path and validated it offline (94%
+selection). The open question was the *policy side*: does a goal-conditioned policy actually
+drive better than the language-conditioned SmolVLA, and is SmolVLA the right vehicle for the
+goal channel at all?
+
+**Reference evaluation (the cheap decisive experiment).** Instead of training first, the
+released **OmniVLA-edge** checkpoint (Berkeley, ICRA'26; ~108M ViNT-lineage nav specialist:
+EfficientNet-B0 × 6-frame history, CLIP-text, 2D-goal-pose channel with modality dropout, L1
+head, MIT) was evaluated **zero-shot** on our recorded frames and our eval seeds through a
+drop-in chunk server (`rover/runtime/omnivla_server.py`, same wire protocol; optional
+privileged `goal_xy` client param + `run_eval.py --send-goal`).
+
+| measurement | pose-conditioned | language-conditioned |
+|---|---|---|
+| offline swap, 12 range-equalised pairs | **12/12**, 29.0° bearing response | 2/12, **1.5°** |
+| closed-loop seeds 9000–9009 | **7/10** | 4/10 |
+
+(SmolVLA stage1c_v3, trained on 520 episodes: 3/10. Expert: 10/10. CLIP itself reads our prop
+colours at **9/11** on projected crops, chance 0.25 — perception is fine; *binding language to
+steering* is what fails, in our model and in theirs.)
+
+**What this settles.**
+1. The **goal-pose channel is the signal-carrying input** — a 9× smaller model beats trained
+   SmolVLA zero-shot when given the goal, and its own language mode collapses to near-zero
+   instruction sensitivity on identical frames. Capacity was never the binding constraint
+   (revises the 2.8 "model capacity" reading; consistent with VLM4VLA's no-size-correlation).
+2. Closed-loop pose-conditioning **is** D9's "just tell it the goal position" fallback,
+   demonstrated at policy level: acquisition (94%) × pose policy (7/10) composes into a
+   deployable path with every stage measured.
+3. The scenes are solvable by a local policy given the goal — remaining failures are 2 transit
+   grazes (5–17 mm) and 1 goal-blocked-by-prop hold, all obstacle-handling, none grounding.
+
+**Executor contract (hard-won, applies to ANY chunk-emitting policy).** Closed-loop exposed
+three shim bugs the offline probes could not: (1) a degenerate/stop-intent model path resampled
+to an all-zero chunk **permanently parks** the tracker (`at_end` latch inside the 0.45 m
+lookahead: frozen rover → identical frames → identical prediction — a fixed point); (2) a
+server that answers an exception with silence starves the tracker invisibly — every request
+must be answered, if only with a slow safe chunk + logged error; (3) arrival stop-points
+compose with the tracker's GOAL_TOL (0.15 m): a 0.55 m stop parks at 0.70 m, 10 cm *outside*
+the 0.6 m referee ring (8× ruler-consistent timeouts). Fixes: Ackermann-feasible recovery arc
+(R ≥ 0.36 m — no turn-in-place exists), in-ring approach stop at 0.40 m, always-reply error
+path. 32 unit checks in `rover/runtime/omnivla_server.py`.
+
+**Decision.**
+- **Task 2.11 — SmolVLA-nav**: add the goal channel to SmolVLA as *data* — state
+  [speed, yaw_rate, steering] + [goal_x, goal_y, cos ψ, sin ψ] (ψ = bearing; all-zeros =
+  goal dropped). `max_state_dim=32` pads anyway, so no model surgery. Detector-realistic noise
+  (D9-measured 5–16 cm) + p≈0.3 goal dropout (OmniVLA's modality-dropout recipe) so language
+  stays load-bearing and one checkpoint measures both channels.
+- **Action head stays flow matching** — navigation is more action-multimodal than manipulation
+  (left/right obstacle splits; NoMaD's reason for a diffusion head), FM is diffusion's cheaper
+  successor (~10 steps, inside the measured 233 ms NX envelope), and the L1 baseline's grazes
+  are the signature unimodal failure. One variable changes in 2.11: the input.
+- **Task 2.12 — bake-off gate**: SmolVLA+goal vs OmniVLA-edge fine-tuned on our expert data,
+  same seeds/referee; success + swap + NX-projected latency pick the M2 backbone.
+- **v4 short-horizon direction closed** (with the 2.10/README horizon result: success moved,
+  swap did not — visibility was necessary-ish but never sufficient).
+
+**Rejected.** Fine-tuning OmniVLA-edge *first* (needs a new data converter before any signal;
+2.11 is a data-only change on proven infrastructure); swapping SmolVLA's backbone for
+Kosmos-2/Florence-2 (surgery + A100 retraining aimed at binding, which the goal channel
+sidesteps); diffusion head (dominated by FM).

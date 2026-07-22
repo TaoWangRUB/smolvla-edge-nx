@@ -13,6 +13,7 @@ chunk source becomes the all-ROS2 policy node, topics unchanged.
 """
 
 import json
+import math
 import socket
 import struct
 import threading
@@ -51,17 +52,46 @@ class ChunkClient(Node):
         self.declare_parameter('server_host', '127.0.0.1')
         self.declare_parameter('server_port', 8790)
         self.declare_parameter('instruction', 'drive to the red barrel')
+        # Optional goal channel, "x,y" in the world frame. Off by default: it
+        # is PRIVILEGED information (the referee's geometry), used only to
+        # measure a pose-conditioned upper bound against language conditioning.
+        # SmolVLA runs leave this empty and are unaffected.
+        self.declare_parameter('goal_xy', '')
         self.host = self.get_parameter('server_host').value
         self.port = int(self.get_parameter('server_port').value)
+        gxy = str(self.get_parameter('goal_xy').value or '').strip()
+        self.goal_xy = [float(v) for v in gxy.split(',')] if gxy else None
 
         self.lock = threading.Lock()
         self.frame = None            # (capture_t, jpeg bytes)
         self.state = [0.0, 0.0, 0.0]
+        self.pose = None             # (x, y, yaw), only when goal_xy is set
         self.pub = self.create_publisher(Float32MultiArray, '/waypoint_chunk', 10)
         self.create_subscription(Image, '/vla_camera/image', self.on_image, 1)
         self.create_subscription(Float32MultiArray, '/observation/state',
                                  self.on_state, 10)
+        if self.goal_xy:
+            from nav_msgs.msg import Odometry
+            self.create_subscription(Odometry, '/ackermann/gt_odom', self.on_odom, 10)
         threading.Thread(target=self.loop, daemon=True).start()
+
+    def on_odom(self, m):
+        q = m.pose.pose.orientation
+        yaw = math.atan2(2.0 * (q.w * q.z + q.x * q.y),
+                         1.0 - 2.0 * (q.y * q.y + q.z * q.z))
+        with self.lock:
+            self.pose = (m.pose.pose.position.x, m.pose.pose.position.y, yaw)
+
+    def goal_body(self):
+        """Commanded goal in the current body frame (x front, y left), or None."""
+        with self.lock:
+            pose = self.pose
+        if not self.goal_xy or pose is None:
+            return None
+        x0, y0, yaw0 = pose
+        dx, dy = self.goal_xy[0] - x0, self.goal_xy[1] - y0
+        c, s = math.cos(-yaw0), math.sin(-yaw0)
+        return [c * dx - s * dy, s * dx + c * dy]
 
     def on_image(self, m):
         t = m.header.stamp.sec + m.header.stamp.nanosec * 1e-9
@@ -87,11 +117,15 @@ class ChunkClient(Node):
                 continue
             capture_t, jpg = frame
             try:
-                rep = request(self.host, self.port, {
+                header = {
                     'state': state,
                     'instruction': self.get_parameter('instruction').value,
                     'capture_t': capture_t,
-                }, jpg)
+                }
+                gb = self.goal_body()
+                if gb is not None:
+                    header['goal_body'] = gb
+                rep = request(self.host, self.port, header, jpg)
             except (OSError, ConnectionError) as e:
                 self.get_logger().warn(f'policy server: {e}', throttle_duration_sec=5.0)
                 time.sleep(0.5)

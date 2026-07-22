@@ -166,3 +166,51 @@ cost order:
    in policy weights.
 3. Explicit goal state in the observation (relative bearing/range once acquired) — i.e. the
    point-goal interface, now well-motivated rather than redundant.
+
+## Update 2026-07-22 — reference model isolates the failure to the language→action pathway
+
+Ran the released **OmniVLA-edge** (~108M ViNT-lineage navigation specialist; 6-frame history,
+CLIP text, 2D goal-pose channel, MIT) zero-shot on our data, as the cheap decisive experiment
+before more training. Three measurements, one story:
+
+**1. Offline swap on 12 range-equalised same-shape/diff-colour pairs** (both props in front,
+opposite sides, matched range — the clean colour condition v4 was built to create):
+
+| modality | swap | mean bearing response |
+|---|---|---|
+| goal pose | **12/12** | 29.0° |
+| language | 2/12 | **1.5°** |
+
+(SmolVLA references on the same protocol: stage1_v3 15.3°, stage1d_deeplm 22.3°, swap ≈ chance.)
+A navigation-pretrained model with a real language head is *less* instruction-sensitive than
+our SmolVLA — language conditioning does nothing on this imagery.
+
+**2. CLIP colour probe on projected prop crops**: 9/11 correct (chance 0.25); both misses are
+crop artefacts (occlusion / frame edge), so 0.82 is a lower bound. Colour is present and
+machine-legible — perception is not the broken stage.
+
+**3. Closed-loop, seeds 9000–9009, same tracker/referee** (privileged goal via
+`run_eval.py --send-goal`): pose **7/10** vs language **4/10** vs trained SmolVLA 3/10
+(expert 10/10). Language misses end 9–15 m from the target — driving *away*, the same
+no-information signature as our traces. Pose failures are obstacle-handling only (two 5–17 mm
+transit grazes, one goal-blocked-by-prop hold).
+
+**Executor forensics (first pose run read 6/10 with freezes — all three causes were ours, the
+model was exonerated by replay: it emits ~1 m paths even for a goal at the origin):**
+1. Stop-intent (near-zero) model paths → all-zero resampled chunk → tracker `at_end` latch =
+   **permanent park** (9001/9009 frozen 40 s; 9007 froze at closest approach, 5 cm from a
+   blocking prop — frozen rover ⇒ identical frames ⇒ identical prediction: a fixed point).
+2. Server exceptions closed the socket without replying → silent tracker starvation.
+3. Arrival stop 0.55 m + tracker GOAL_TOL 0.15 m = park at 0.70 m — 10 cm *outside* the 0.6 m
+   ring; 8 episodes timed out at 0.69–0.70 m, ruler-consistent.
+Fixed (recovery arc R ≥ 0.36 m, in-ring stop 0.40 m, always-reply errors; 32 unit checks) →
+7/10, previously-frozen 9001 reaches cleanly.
+
+**Reading.** Combining with the v4 horizon result (success 4/10 but swap unmoved at 1/9):
+every stage of the pipeline is now individually measured — colour perception ✓ (CLIP 9/11),
+goal-conditioned driving ✓ (12/12 offline, 7/10 closed-loop), language→steering ✗ in every
+model tested (ours across 6 interventions; theirs zero-shot). The failure is not data, not
+capacity (9× smaller wins with the right input), not visibility (v4), not perception — it is
+the **binding of the instruction to a spatial target inside the policy**, and the measured
+escape is to stop asking the policy to do it: acquisition selects (D9, 94%), a goal channel
+steers (D10, tasks 2.11–2.12).

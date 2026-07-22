@@ -1,0 +1,76 @@
+{
+  "config": {
+    "seed": 9003,
+    "scene": "open_ground",
+    "sun_elevation_deg": 54.12117409461799,
+    "sun_azimuth_deg": 89.96179420452474,
+    "sun_intensity": 0.9131765609113152,
+    "ground_rgb": [
+      0.5458306096873697,
+      0.5433795639149323,
+      0.32166011481495715
+    ],
+    "spawn": [
+      0.0,
+      0.04120291305217322,
+      0.1265110681684631
+    ],
+    "props": [
+      {
+        "name": "ep_prop_0",
+        "shape": "barrel",
+        "color": "red",
+        "x": 4.485621784208894,
+        "y": 1.144957020436039,
+        "yaw": 1.7902592854816153
+      },
+      {
+        "name": "ep_prop_1",
+        "shape": "ball",
+        "color": "red",
+        "x": 3.0711817570319178,
+        "y": -0.041613399793910336,
+        "yaw": 2.672065218296059
+      },
+      {
+        "name": "ep_prop_2",
+        "shape": "barrel",
+        "color": "yellow",
+        "x": 4.305758523533659,
+        "y": -0.39966988718172275,
+        "yaw": 2.2801210407506547
+      },
+      {
+        "name": "ep_prop_3",
+        "shape": "ball",
+        "color": "yellow",
+        "x": 4.627253544888895,
+        "y": -2.0105434620783424,
+        "yaw": 1.8741372693345286
+      },
+      {
+        "name": "ep_prop_4",
+        "shape": "pillar",
+        "color": "blue",
+        "x": 6.298041367716985,
+        "y": -1.6764540364554603,
+        "yaw": 2.056905122570391
+      }
+    ],
+    "goal_index": 0,
+    "instruction": "drive to the red barrel"
+  },
+  "verdict": {
+    "outcome": "reached",
+    "success": true,
+    "time_s": 8.65,
+    "min_clearance_m": 0.263,
+    "nearest_prop": "ep_prop_0",
+    "dist_to_target": 0.593,
+    "scene": "open_ground",
+    "seed": 9003,
+    "instruction": "drive to the red barrel",
+    "target": "ep_prop_0"
+  },
+  "success": true
+}

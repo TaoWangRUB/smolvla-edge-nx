@@ -1,0 +1,76 @@
+{
+  "config": {
+    "seed": 9007,
+    "scene": "open_ground",
+    "sun_elevation_deg": 59.38763333638208,
+    "sun_azimuth_deg": 8.929341225218703,
+    "sun_intensity": 0.8010866939541629,
+    "ground_rgb": [
+      0.687280631219529,
+      0.7815371576463455,
+      0.20411918077677416
+    ],
+    "spawn": [
+      0.0,
+      -0.09939094559669792,
+      0.10893302884988779
+    ],
+    "props": [
+      {
+        "name": "ep_prop_0",
+        "shape": "pillar",
+        "color": "blue",
+        "x": 3.4340670764557,
+        "y": -1.7221782763656515,
+        "yaw": 0.6561235923385724
+      },
+      {
+        "name": "ep_prop_1",
+        "shape": "ball",
+        "color": "blue",
+        "x": 2.985456290301662,
+        "y": 0.6995446984918519,
+        "yaw": 2.9113625225255264
+      },
+      {
+        "name": "ep_prop_2",
+        "shape": "pillar",
+        "color": "yellow",
+        "x": 2.6408000461961487,
+        "y": -1.075453787892139,
+        "yaw": 1.2131736114025264
+      },
+      {
+        "name": "ep_prop_3",
+        "shape": "barrel",
+        "color": "blue",
+        "x": 3.681298719739429,
+        "y": 0.9462311948547113,
+        "yaw": 0.49173533934369695
+      },
+      {
+        "name": "ep_prop_4",
+        "shape": "crate",
+        "color": "red",
+        "x": 4.283556568378924,
+        "y": 1.5842688250348045,
+        "yaw": 0.9098576546307657
+      }
+    ],
+    "goal_index": 0,
+    "instruction": "drive to the blue pillar"
+  },
+  "verdict": {
+    "outcome": "timeout",
+    "success": false,
+    "time_s": 40.05,
+    "min_clearance_m": 0.495,
+    "nearest_prop": "ep_prop_0",
+    "dist_to_target": 9.611,
+    "scene": "open_ground",
+    "seed": 9007,
+    "instruction": "drive to the blue pillar",
+    "target": "ep_prop_0"
+  },
+  "success": false
+}
