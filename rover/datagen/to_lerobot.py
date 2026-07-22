@@ -81,7 +81,7 @@ def lerp_yaw(pose_rows, t):
 
 def convert(raw_root, out_root, repo_id, fps, include_failures,
             chunk_k=0, chunk_dt=0.25, use_paraphrase=False, scenes=None,
-            goal_state_p_drop=None):
+            goal_state_p_drop=None, chunk_arclen=0.0, oversample_approach=0):
     import cv2
     from lerobot.datasets.lerobot_dataset import LeRobotDataset
 
@@ -90,6 +90,8 @@ def convert(raw_root, out_root, repo_id, fps, include_failures,
         _sys.path.insert(0, str(pathlib.Path(__file__).parent))
     if chunk_k or goal_state_p_drop is not None:
         from relabel import PoseTrack, waypoint_chunk
+    if chunk_arclen:
+        from relabel import waypoint_chunk_arclen
     if goal_state_p_drop is not None:
         from relabel import goal_state
     if use_paraphrase:
@@ -119,9 +121,9 @@ def convert(raw_root, out_root, repo_id, fps, include_failures,
         'observation.image': {'dtype': 'video', 'shape': (800, 1280, 3),
                               'names': ['height', 'width', 'channels']},
         'observation.state': (
-            {'dtype': 'float32', 'shape': (7,),
-             'names': ['speed', 'yaw_rate', 'steering',
-                       'goal_x', 'goal_y', 'goal_cos', 'goal_sin']}
+            {'dtype': 'float32', 'shape': (8,),
+             'names': ['speed', 'yaw_rate', 'steering', 'goal_x', 'goal_y',
+                       'goal_cos', 'goal_sin', 'goal_inv']}
             if goal_state_p_drop is not None else
             {'dtype': 'float32', 'shape': (3,),
              'names': ['speed', 'yaw_rate', 'steering']}),
@@ -177,7 +179,13 @@ def convert(raw_root, out_root, repo_id, fps, include_failures,
         for fr in frames:
             img = cv2.imread(str(ep / 'frames' / f"{fr['i']:06d}.jpg"))
             if chunk_k:
-                ch = waypoint_chunk(track, fr['t'], k=chunk_k, dt=chunk_dt)
+                # Arc-length labels (early-stop fix): geometry independent of
+                # the expert's speed profile; time-based kept as the default.
+                if chunk_arclen:
+                    ch = waypoint_chunk_arclen(track, fr['t'], k=chunk_k,
+                                               ds=chunk_arclen)
+                else:
+                    ch = waypoint_chunk(track, fr['t'], k=chunk_k, dt=chunk_dt)
                 action = np.asarray([c for wp in ch for c in wp],
                                     dtype=np.float32)
             else:
@@ -187,12 +195,16 @@ def convert(raw_root, out_root, repo_id, fps, include_failures,
             if goal_cfg is not None:
                 g, rng, dropped, bias = goal_cfg
                 if dropped:
-                    gs = [0.0, 0.0, 0.0, 0.0]   # reserved no-goal value
+                    gs = [0.0, 0.0, 0.0, 0.0, 0.0]   # reserved no-goal value
                 else:
                     gs = goal_state(track, fr['t'], (g['x'], g['y']),
                                     bias=bias,
                                     jitter=rng.normal(0.0, GOAL_JITTER_SIGMA,
                                                       size=2))
+                    # 1/range: near-goal resolution (between 0.9 m and 0.6 m
+                    # goal_x moves only ~0.12 sigma; 1/range moves ~0.6/m).
+                    import math as _m
+                    gs = gs + [1.0 / max(_m.hypot(gs[0], gs[1]), 0.3)]
                 obs_state = np.concatenate(
                     [obs_state, np.asarray(gs, dtype=np.float32)])
             frame = {
@@ -202,10 +214,18 @@ def convert(raw_root, out_root, repo_id, fps, include_failures,
                                                   dtype=np.float32),
                 'action': action,
             }
-            try:
-                ds.add_frame({**frame, 'task': task})
-            except (TypeError, ValueError):
-                ds.add_frame(frame, task=task)
+            reps = 1
+            if (oversample_approach and goal_cfg is not None and not dropped):
+                rng_now = float(np.hypot(obs_state[3], obs_state[4]))
+                if 0.6 < rng_now < 1.5:
+                    # sharpen the arrival boundary: extra copies of the
+                    # final-approach band
+                    reps = 1 + int(oversample_approach)
+            for _ in range(reps):
+                try:
+                    ds.add_frame({**frame, 'task': task})
+                except (TypeError, ValueError):
+                    ds.add_frame(frame, task=task)
         ds.save_episode()
         n_done += 1
         print(f'converted: {ep.name} ({len(frames)} frames, task={task!r})')
@@ -230,6 +250,11 @@ def main():
     ap.add_argument('--paraphrase', action='store_true',
                     help='replace canonical instructions with train-pool '
                          'paraphrases (heldout pool stays reserved)')
+    ap.add_argument('--chunk-arclen', type=float, default=0.0, metavar='DS',
+                    help='arc-length waypoint labels at DS metre spacing '
+                         '(early-stop fix; 0 = time-parameterized default)')
+    ap.add_argument('--oversample-approach', type=int, default=0,
+                    help='extra copies of frames with goal range 0.6-1.5 m')
     ap.add_argument('--goal-state', type=float, default=None, metavar='P_DROP',
                     help='append the 4-dim goal channel [gx, gy, cos, sin] to '
                          'observation.state (task 2.11 / design D10); the value '
@@ -241,7 +266,8 @@ def main():
             args.include_failures, args.chunk_k, args.chunk_dt,
             args.paraphrase,
             scenes=[s for s in args.scenes.split(',') if s] or None,
-            goal_state_p_drop=args.goal_state)
+            goal_state_p_drop=args.goal_state, chunk_arclen=args.chunk_arclen,
+            oversample_approach=args.oversample_approach)
 
 
 if __name__ == '__main__':

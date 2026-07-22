@@ -313,6 +313,34 @@ Closed-loop also hardened the chunk-executor contract (recovery arc instead of z
 an all-zero chunk permanently parks the tracker; always-reply server errors; arrival stop
 inside the ring): see D10.
 
+**SmolVLA + goal channel (2026-07-22, task 2.11): 7/10 — parity with the nav-pretrained
+reference.** Adding a 4-dim body-frame goal to `observation.state` (a data change — SmolVLA pads
+to `max_state_dim=32`, no surgery), trained frozen-backbone with detector-realistic goal noise +
+0.33 dropout:
+
+| seeds 9000–9009, same tracker/referee | success |
+|---|---|
+| SmolVLA language-only (goal zeroed) | 1/10 |
+| SmolVLA + goal, no arrival assist | 0/10 — drives to the RIGHT object, parks 0.78–1.00 m *outside* the ring |
+| **SmolVLA + goal + arrival assist** | **7/10** (six reaches at 0.59–0.60 m) |
+| OmniVLA-edge pose (reference) | 7/10 |
+
+The goal channel solved the grounding failure of M1 (it drives to the *commanded* object). The
+residual is the **last-meter problem**, not grounding: the policy stops where the expert demos stop
+(~0.56 m ring edge) and the tracker parks ~0.15 m short → ~0.7–0.9 m out. The *arrival assist* — a
+geometric server-side override that drives the final ~0.15 m into the ring (no model change) —
+closes it, the same executor treatment OmniVLA-edge got. Remaining misses (9000 wander,
+9001/9007 grazes at −6/−7 mm) are the clutter class both models share. GIFs: `gifs_v3g2/`.
+Two serving bugs fixed along the way (they made a good model look broken): the lerobot-0.4.4
+normalization pipeline wasn't loaded (goal channel appeared dead; also inflates all historical
+raw-served numbers — stage1c_v3 is really 0/10, not 3/10), and `--arrival-assist` was dropped by
+nested-docker quoting (a real 7/10 read as 0/10; now default-on). **Negative result:** arc-length
+labels (rover_vla_v3g2) were null — the offline probe proved v3g2 and v3g emit near-identical
+chunks; the near-goal collapse reflects the *expert* stopping at the ring, not a label artifact.
+The arrival assist is a stopgap for the recognised last-meter problem; the real M2 fix is to remove
+speed from the action space (executor owns speed + ring-stop from goal range) + DAgger on terminal
+states — see [design D11](../openspec/changes/rover-vla-sim-first/design.md).
+
 **Built for the long-term fix** (task 5.1, pulled forward from M4):
 `rover_runtime/goal_memory_node.py` (odom-frame goal memory, emits the policy's `/waypoint_chunk`
 format so the tracker is unchanged) and `goal_projection.py` (bbox → body frame; ground-plane for

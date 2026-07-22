@@ -320,14 +320,50 @@ purchase is gated behind M2 (except camera *selection*, which is an M0 task by d
       channel beats trained SmolVLA zero-shot, so the binding constraint is the input/objective
       design, not parameters; (c) language's job moves to *selection* (detector), geometry to
       *steering* (goal channel) — the D9/D3 decomposition, now measured stage-by-stage.
-- [ ] 2.11 **SmolVLA goal-channel adaptation (test the capacity hypothesis fairly).** Extend
-      `observation.state` [speed, yaw_rate, steering] → + [goal_x, goal_y, cos ψ, sin ψ] in the
-      body frame (SmolVLA pads state to `max_state_dim=32`, so this is a data change — no model
-      surgery). `relabel.py --goal-state`: goal from `episode.json` props + `gt_pose`, with
-      detector-realistic noise (5–16 cm measured in 5.1) and p≈0.3 goal-dropout so language
-      remains load-bearing when the goal channel is masked (OmniVLA's modality-dropout recipe).
-      Retrain stage-1 frozen-backbone on v3; eval seeds 9000–9009 with `--send-goal` and
-      without. Success criterion: pose-conditioned ≥ OmniVLA-edge zero-shot (7/10).
+- [x] 2.11 **DONE 2026-07-22 — SmolVLA goal-channel adaptation: 7/10, parity with the
+      nav-pretrained reference; the goal channel was the whole fix.** Extended
+      `observation.state` [speed, yaw_rate, steering] → + [goal_x, goal_y, cos ψ, sin ψ] (SmolVLA
+      pads to `max_state_dim=32`, so a data change — no model surgery). `relabel.py goal_state()`
+      + `to_lerobot.py --goal-state 0.3`: goal from `episode.json` props + `gt_pose`, per-episode
+      bias σ=5 cm + per-frame jitter σ=3 cm (D9's measured 5–16 cm), 0.33 goal-dropout so
+      language stays load-bearing. Frozen-backbone stage-1 on `rover_vla_v3g`, 10k steps.
+
+      **Result (seeds 9000–9009, same tracker/referee):**
+      | checkpoint / serving | success |
+      |---|---|
+      | SmolVLA language-only (goal zeroed) | 1/10 |
+      | SmolVLA + goal, **no arrival assist** | 0/10 (drives to the RIGHT object, parks 0.78–1.00 m — just outside the 0.6 m ring) |
+      | **SmolVLA + goal + arrival assist** | **7/10** |
+      | OmniVLA-edge pose (reference) | 7/10 |
+
+      **The goal channel solved the hard part** (drives to the commanded object — the failure of
+      the whole M1). The residual is the *last-meter* problem, not grounding: the policy stops
+      where the expert demos stop (~0.56 m ring edge), the tracker parks ~0.15 m short of any
+      chunk end, so it lands ~0.70–0.90 m out. The arrival assist (executor drives the final
+      ~0.15 m into the ring; `approach_chunk` targets 0.40 m so realised stop 0.40–0.55 m) closes
+      it — the SAME executor treatment OmniVLA-edge got, so 7-vs-7 is symmetric. Six clean reaches
+      at 0.59–0.60 m; the three misses (9000 wander, 9001/9007 grazes −6/−7 mm) are the clutter
+      class, shared with OmniVLA-edge. GIFs: `rover/gifs_v3g2/v3g2_900*.gif`.
+
+      **Two serving bugs found and fixed (they masqueraded as model failures — the model was fine
+      from stage1_v3g on):** (1) lerobot 0.4.4 keeps normalization in a *separate* processor file
+      not loaded by the raw server → the goal channel was fed un-normalized and appeared dead
+      (offline probe was flat until `make_pre_post_processors` was wired in); this also means ALL
+      historical SmolVLA closed-loop numbers (stage1c_v3's 3/10) carried a raw-serving over-scaling
+      artifact — re-served honestly, stage1c_v3 is 0/10, so language-conditioned SmolVLA was never
+      above ~1/10. (2) `--arrival-assist` behind a flag dropped by nested-docker quoting → a run
+      that was really 7/10 read as 0/10; the assist is now default-on (`--no-arrival-assist` to
+      disable), since goal-mode arrival structurally needs it.
+
+      **NEGATIVE result — arc-length labels (rover_vla_v3g2) were null.** Hypothesised the early
+      stop came from time-parameterized labels shrinking near the goal; built `waypoint_chunk_arclen`
+      (fixed 0.125 m arc spacing, v pinned at cruise) + 1/range dim + approach-band oversampling,
+      retrained (stage1_v3g2, 8-dim). Offline probe on identical frames: v3g2 and v3g emit
+      **near-identical chunks** (extent 1.25 m far, collapsing to ~0.04 m at 0.68 m in BOTH). The
+      collapse is not a label artifact — it is the model faithfully reproducing that the EXPERT
+      stops at the ring. Arc-length changed nothing; the 7/10 is the goal channel + assist, not the
+      labels. Lesson: probe offline before spending GPU-hours on a label hypothesis.
+      Success criterion (≥ OmniVLA-edge 7/10): **met.**
       **Action head stays flow matching (decided 2026-07-22):** navigation is *more*
       action-multimodal than manipulation (left/right obstacle splits — the reason NoMaD put a
       diffusion head on ViNT), FM is the cheaper successor of diffusion (~10 steps vs 50–100,
