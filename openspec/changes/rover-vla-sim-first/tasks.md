@@ -393,7 +393,35 @@ purchase is gated behind M2 (except camera *selection*, which is an M0 task by d
       for D9: A2000-fp32 is 3190 ms and the NX extrapolation spans ~1-10 s. Acquisition is
       0.1-1 Hz (D3) so seconds are tolerable, but the number must be real before M4.
 
-- [ ] 2.9 **v4 horizon test — experimental design** (do not skip the controls)
+- [x] 2.10 **v4 horizon test** — DONE 2026-07-22, outcome = row 3 (NEGATIVE for grounding).
+      (Numbered 2.10: an unrelated contingency item above already holds 2.9.)
+
+      **Result** (identical scenes, seeds 9000-9009, goals 2.0-3.5 m, closed-loop + swap):
+
+      | metric | stage1_v4 | stage1_v3 CONTROL on same scenes |
+      |---|---|---|
+      | reached the commanded prop | **4/10** | 1/10 |
+      | reached the WRONG prop | 2 | 0 |
+      | closed-loop swap (both of pair correct) | **1/9** | **1/9** |
+
+      Success rose; swap did not move. Per the pre-registered table below this is the
+      saliency-shortcut row: short-horizon training improves drive-to-nearby-object
+      competence, but **keeping the goal in view for the entire approach is not sufficient
+      for SmolVLA to bind the instruction to the target** — the 2 wrong-prop reaches are
+      that shortcut observed directly. The horizon hypothesis is refuted for grounding;
+      grounding stays with the D9 acquisition path (measured 94% correct-prop offline).
+      Training: 539 eps / 54,194 frames (1.5 epochs vs v3's 1.1), loss 3.43 -> 0.52,
+      v3's exact recipe. Logs: eval_results/eval_{v4,v3ctl}_open_ground_v4scenes.log.
+      parking_lot eval for both checkpoints: optional follow-up (needs world swap); the
+      open_ground pair already answers the hypothesis.
+
+      Ops incidents recorded during the run, both fixed in-tree: (a) run_eval's referee
+      loop could hang forever when a DDS-wedged sim stalled /clock (leaked tracker/client
+      nodes, load runaway, 91 min on one seed) -> 90 s wall-clock backstop guarantees
+      teardown, wall_timeout in the log is now the wedge signal, recovery needs a sim
+      restart; (b) grep|tee block-buffering hid eval output until pipe close -> stdbuf -oL.
+
+      --- original pre-registered design below ---
 
       Question: does shortening the goal range restore language grounding, or was
       M1's failure caused by something else?

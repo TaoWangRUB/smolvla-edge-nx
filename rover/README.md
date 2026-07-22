@@ -263,13 +263,31 @@ surgery), chunk horizon 2.5 s ≈ **1.25 m**, goals **2–7 m** away. Once the g
 FOV, **nothing in the input says where it is**. Design D3 assigned goal persistence to the mission
 loop; deferring that loop left the policy doing the mission layer's job.
 
-**Decision (design D9):** split grounding from control — open-vocabulary detector (OWL-ViT via
-**NanoOWL**, which unlike a 3B VLM actually fits the Xavier NX) → geometric projection → goal held
-in the **odom frame** → existing tracker. Qwen2.5-VL as a policy backbone was rejected on measured
-deployment grounds (12.1 GB / 28.5 s on Jetson Xavier vs 8 GB available).
+**Decision (design D9):** split grounding from control — open-vocabulary detector → geometric
+projection → goal held in the **odom frame** → existing tracker. Validated offline against
+ground truth on recorded episodes: **selects the commanded prop 94%** (open_ground 98%,
+corridor 89%), position error 0.13–0.22 m median, bearing 0.1°. Detector caveats are measured,
+not assumed: NanoOWL's `owlvit-base-patch32` backbone gets only 22% recall here (flat vs range —
+neither tiling nor driving closer rescues it), so **OWLv2 is required** (~12× compute; fits the
+0.1–1 Hz mission loop, on-NX latency still unmeasured — tasks 5.5). Qwen2.5-VL as a policy
+backbone was rejected on measured deployment grounds (12.1 GB / 28.5 s on Jetson Xavier vs 8 GB).
 
-**In flight:** `rover_vla_v4` with goals at **2.0–3.5 m**, range-equalised — keeps the goal in view
-*and* removes the distance confound, making the swap test a clean colour measure for the first time.
+**Horizon test result (v4, 2026-07-22): refuted for grounding.** `rover_vla_v4` (goals
+2.0–3.5 m, range-equalised, 539 episodes ≈ v3's 520, identical training recipe) was evaluated
+closed-loop against the **stage1_v3 checkpoint on the very same short-horizon scenes** — the
+control that separates "training helped" from "eval got easier":
+
+| identical scenes (seeds 9000–9009) | stage1_v4 | stage1_v3 control |
+|---|---|---|
+| reached the commanded prop | **4/10** | 1/10 |
+| reached the **wrong** prop | 2 | 0 |
+| closed-loop swap (both of pair correct) | **1/9** | **1/9** |
+
+Success rose, swap did not move — the pre-registered *negative* outcome (tasks.md §2.9):
+short-horizon training improves *drive-to-nearby-object* competence but **keeping the goal in
+view for the whole approach is not sufficient for SmolVLA to bind the instruction to the
+target**. The two wrong-prop reaches are the close-range saliency shortcut directly observed.
+Conclusion: grounding must come from the acquisition path (D9), not from the policy.
 
 **Built for the long-term fix** (task 5.1, pulled forward from M4):
 `rover_runtime/goal_memory_node.py` (odom-frame goal memory, emits the policy's `/waypoint_chunk`
