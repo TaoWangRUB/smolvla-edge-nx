@@ -1,0 +1,68 @@
+{
+  "config": {
+    "seed": 9004,
+    "scene": "open_ground",
+    "sun_elevation_deg": 54.91323281253306,
+    "sun_azimuth_deg": 206.57209345127447,
+    "sun_intensity": 0.8957242888879631,
+    "ground_rgb": [
+      0.2462399632918448,
+      0.27247959342262845,
+      0.5535312946114739
+    ],
+    "spawn": [
+      0.0,
+      0.294190578710348,
+      -0.008930717881858535
+    ],
+    "props": [
+      {
+        "name": "ep_prop_0",
+        "shape": "barrel",
+        "color": "green",
+        "x": 3.593475181449663,
+        "y": -2.334262384616371,
+        "yaw": 3.1162822528273972
+      },
+      {
+        "name": "ep_prop_1",
+        "shape": "pillar",
+        "color": "green",
+        "x": 3.294459043027254,
+        "y": -0.6472393961570779,
+        "yaw": 1.1995372133016213
+      },
+      {
+        "name": "ep_prop_2",
+        "shape": "barrel",
+        "color": "red",
+        "x": 6.645284616787811,
+        "y": 0.0968256549853394,
+        "yaw": 2.514442396689676
+      },
+      {
+        "name": "ep_prop_3",
+        "shape": "pillar",
+        "color": "yellow",
+        "x": 3.6477074077500014,
+        "y": 2.975619922340718,
+        "yaw": 2.9504743115388194
+      }
+    ],
+    "goal_index": 0,
+    "instruction": "drive to the green barrel"
+  },
+  "verdict": {
+    "outcome": "reached",
+    "success": true,
+    "time_s": 8.3,
+    "min_clearance_m": 0.262,
+    "nearest_prop": "ep_prop_0",
+    "dist_to_target": 0.592,
+    "scene": "open_ground",
+    "seed": 9004,
+    "instruction": "drive to the green barrel",
+    "target": "ep_prop_0"
+  },
+  "success": true
+}

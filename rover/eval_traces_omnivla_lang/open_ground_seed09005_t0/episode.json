@@ -1,0 +1,68 @@
+{
+  "config": {
+    "seed": 9005,
+    "scene": "open_ground",
+    "sun_elevation_deg": 43.7924387579155,
+    "sun_azimuth_deg": 105.10019977287988,
+    "sun_intensity": 0.8816904068196758,
+    "ground_rgb": [
+      0.784236732768042,
+      0.4223939851436229,
+      0.5416857252182949
+    ],
+    "spawn": [
+      0.0,
+      -0.08964915527010534,
+      0.13398299007239503
+    ],
+    "props": [
+      {
+        "name": "ep_prop_0",
+        "shape": "crate",
+        "color": "red",
+        "x": 4.527508726551008,
+        "y": -1.202479244829609,
+        "yaw": 0.9752890744683035
+      },
+      {
+        "name": "ep_prop_1",
+        "shape": "ball",
+        "color": "red",
+        "x": 3.891776150847633,
+        "y": 1.1326606221821247,
+        "yaw": 1.6048743700683035
+      },
+      {
+        "name": "ep_prop_2",
+        "shape": "crate",
+        "color": "green",
+        "x": 5.794637024788709,
+        "y": -1.9302889203402127,
+        "yaw": 1.8674125041058596
+      },
+      {
+        "name": "ep_prop_3",
+        "shape": "barrel",
+        "color": "red",
+        "x": 4.5247712728893275,
+        "y": 0.35684321429970134,
+        "yaw": 3.017336446444933
+      }
+    ],
+    "goal_index": 0,
+    "instruction": "drive to the red crate"
+  },
+  "verdict": {
+    "outcome": "timeout",
+    "success": false,
+    "time_s": 40.05,
+    "min_clearance_m": 0.054,
+    "nearest_prop": "ep_prop_3",
+    "dist_to_target": 1.676,
+    "scene": "open_ground",
+    "seed": 9005,
+    "instruction": "drive to the red crate",
+    "target": "ep_prop_0"
+  },
+  "success": false
+}

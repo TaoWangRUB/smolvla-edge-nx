@@ -284,6 +284,73 @@ purchase is gated behind M2 (except camera *selection*, which is an M0 task by d
       should prefer Colab.
 - [ ] 2.9 Contingency check: if tracking oscillates on policy chunks, switch output to (κ, v)
       per design D2 before touching model capacity.
+- [x] 2.10 **DONE 2026-07-22 — OmniVLA-edge reference evaluation: the failure is missing
+      inputs, not capacity.** Released navigation checkpoint (`NHirose/omnivla-edge`, ~108M
+      ViNT-lineage, MIT; EfficientNet-B0 × 6-frame history + CLIP-text + goal-pose channel with
+      modality dropout, L1 head) evaluated zero-shot on our frames and seeds via a drop-in
+      server speaking the policy_server wire protocol (`rover/runtime/omnivla_server.py`).
+      **Offline** (12 range-equalised same-shape/diff-colour pairs, `rover/eval/omnivla_swap.py`):
+      pose-conditioned swap **12/12**, mean bearing change 29.0°; language-conditioned **2/12**,
+      1.5° — language conditioning does nothing on our imagery even in a nav-pretrained model.
+      CLIP itself reads our prop colours fine (**9/11**, chance 0.25, `clip_prop_probe.py`) —
+      so colour *perception* is intact and the broken step is language→spatial-action binding,
+      in ours and in theirs. **Closed-loop** (eval seeds 9000–9009, same tracker/referee;
+      `--send-goal` privileged pose via new optional `goal_xy` client param):
+      | run | success |
+      |---|---|
+      | expert | 10/10 |
+      | SmolVLA stage1c_v3 (trained, 520 ep) | 3/10 |
+      | OmniVLA-edge language (zero-shot) | 4/10 |
+      | OmniVLA-edge **pose** (zero-shot, fixed executor) | **7/10** |
+      Executor bugs found closed-loop (all in our shim, model exonerated by replay — it emits
+      ~1 m paths even for a goal at the origin): (1) stop-intent paths → all-zero chunk →
+      tracker `at_end` latch = **permanent park** (seeds 9001/9007/9009 froze; 9007 froze at
+      its closest approach, 5 cm from a blocking prop); (2) server exceptions closed the socket
+      with no reply → silent tracker starvation; (3) arrival stop-point 0.55 m + tracker
+      GOAL_TOL 0.15 = park at 0.70 m, 10 cm *outside* the 0.6 m ring (8× timeout at 0.69–0.70).
+      Fixes: Ackermann-feasible recovery arc (R ≥ 0.36 m), in-ring approach stop (0.40 m),
+      always-reply error path; 32 unit checks. Remaining failures are model-level: 2 transit
+      grazes (−0.005/−0.017 m), 1 goal-blocked-by-prop hold. Warm latency 56–80 ms (vs
+      SmolVLA 280 ms) on the Titan X. Artifacts: `compare4_seed900*.gif` (expert | SmolVLA |
+      OmniVLA-lang | OmniVLA-pose), traces in `eval_traces_omnivla_{lang,pose}_v2/`.
+      **Decisions:** (a) **v4 short-horizon dataset deprioritized** — it tests the visibility
+      confound, but the pose-vs-language contrast (7/10 vs 4/10 in one model on identical
+      frames) already isolates the failure to goal conditioning; (b) the scaling-law reading of
+      stage1d (2.8: "capacity") is **revised**: a 9× smaller navigation policy with a goal
+      channel beats trained SmolVLA zero-shot, so the binding constraint is the input/objective
+      design, not parameters; (c) language's job moves to *selection* (detector), geometry to
+      *steering* (goal channel) — the D9/D3 decomposition, now measured stage-by-stage.
+- [ ] 2.11 **SmolVLA goal-channel adaptation (test the capacity hypothesis fairly).** Extend
+      `observation.state` [speed, yaw_rate, steering] → + [goal_x, goal_y, cos ψ, sin ψ] in the
+      body frame (SmolVLA pads state to `max_state_dim=32`, so this is a data change — no model
+      surgery). `relabel.py --goal-state`: goal from `episode.json` props + `gt_pose`, with
+      detector-realistic noise (5–16 cm measured in 5.1) and p≈0.3 goal-dropout so language
+      remains load-bearing when the goal channel is masked (OmniVLA's modality-dropout recipe).
+      Retrain stage-1 frozen-backbone on v3; eval seeds 9000–9009 with `--send-goal` and
+      without. Success criterion: pose-conditioned ≥ OmniVLA-edge zero-shot (7/10).
+      **Action head stays flow matching (decided 2026-07-22):** navigation is *more*
+      action-multimodal than manipulation (left/right obstacle splits — the reason NoMaD put a
+      diffusion head on ViNT), FM is the cheaper successor of diffusion (~10 steps vs 50–100,
+      already inside the measured 233 ms NX envelope), and the L1-regression baseline's two
+      grazing collisions are the signature failure of unimodal heads on binary route choices.
+      Also methodological: 2.11 tests the input hypothesis — one variable at a time; revisit
+      the head only if the bake-off traces show mode-averaging or chunk-to-chunk dithering
+      (known mitigation: warm-started sampling / RTC-style chunk consistency).
+      **Temporal context stays out (decided 2026-07-22):** `n_obs_steps` is dead code in
+      SmolVLA (config default only, never read by modeling code — verified in lerobot 0.4.4),
+      and the reference experiment shows history isn't the signal: OmniVLA-edge *has* 6-frame
+      history yet its language mode scored 2/12, while its history-independent goal channel
+      scored 12/12. Goal memory supplies the temporal information exactly (odom-frame
+      persistence) rather than asking the policy to learn object permanence from pixels — D3's
+      memory-in-state principle. Contingency if dynamic obstacles (M3 pedestrians) demand
+      motion cues: feed the previous frame as a second image key — SmolVLA accepts multiple
+      cameras and SmolVLM2 is video-pretrained, so two-frame context needs fine-tuning only,
+      no `n_obs_steps` surgery (+~64 prefix tokens on the NX budget).
+- [ ] 2.12 **Policy bake-off gate (pick the M2 backbone on numbers).** Same seeds, same
+      referee: (a) SmolVLA+goal (2.11) vs (b) OmniVLA-edge fine-tuned on our expert episodes
+      (pose+language dropout; ~108M trains fp32 on the Titan X). Report success, swap,
+      NX-projected latency. The winner becomes the M2 training target; the loser is retired.
+      Either way the runtime keeps the async chunk contract (tracker/client unchanged).
 
 ## 3. M2 — Robust policy (4–6 weeks)
 

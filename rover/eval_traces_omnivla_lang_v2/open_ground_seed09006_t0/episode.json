@@ -1,0 +1,84 @@
+{
+  "config": {
+    "seed": 9006,
+    "scene": "open_ground",
+    "sun_elevation_deg": 72.64290270406303,
+    "sun_azimuth_deg": 313.53596734417494,
+    "sun_intensity": 1.0172694380217928,
+    "ground_rgb": [
+      0.27325134590278505,
+      0.6549598818893483,
+      0.6736739110670902
+    ],
+    "spawn": [
+      0.0,
+      0.26602692635574593,
+      -0.03205890441381312
+    ],
+    "props": [
+      {
+        "name": "ep_prop_0",
+        "shape": "crate",
+        "color": "blue",
+        "x": 6.2091248598931745,
+        "y": -0.1689117154280037,
+        "yaw": 2.9838625342930047
+      },
+      {
+        "name": "ep_prop_1",
+        "shape": "pillar",
+        "color": "blue",
+        "x": 3.2682220071660053,
+        "y": 0.7147690845626435,
+        "yaw": 2.0543453971206787
+      },
+      {
+        "name": "ep_prop_2",
+        "shape": "crate",
+        "color": "yellow",
+        "x": 2.4250459117489678,
+        "y": 0.8822061282599991,
+        "yaw": 2.2699799763058444
+      },
+      {
+        "name": "ep_prop_3",
+        "shape": "pillar",
+        "color": "yellow",
+        "x": 4.402358766344334,
+        "y": 0.4447012993444292,
+        "yaw": 2.7809743311023434
+      },
+      {
+        "name": "ep_prop_4",
+        "shape": "ball",
+        "color": "yellow",
+        "x": 3.8935961097172176,
+        "y": 2.3473555276930105,
+        "yaw": 2.9757707317348845
+      },
+      {
+        "name": "ep_prop_5",
+        "shape": "crate",
+        "color": "red",
+        "x": 3.9300802752335766,
+        "y": -2.0786056226399166,
+        "yaw": 1.6948052109255642
+      }
+    ],
+    "goal_index": 0,
+    "instruction": "drive to the blue crate"
+  },
+  "verdict": {
+    "outcome": "reached",
+    "success": true,
+    "time_s": 16.46,
+    "min_clearance_m": 0.124,
+    "nearest_prop": "ep_prop_0",
+    "dist_to_target": 0.594,
+    "scene": "open_ground",
+    "seed": 9006,
+    "instruction": "drive to the blue crate",
+    "target": "ep_prop_0"
+  },
+  "success": true
+}

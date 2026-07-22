@@ -289,6 +289,30 @@ view for the whole approach is not sufficient for SmolVLA to bind the instructio
 target**. The two wrong-prop reaches are the close-range saliency shortcut directly observed.
 Conclusion: grounding must come from the acquisition path (D9), not from the policy.
 
+**Reference model check (2026-07-22, tasks 2.10 / design D10): the goal channel carries the
+signal.** The released **OmniVLA-edge** (~108M nav specialist with a 2D goal-pose channel, MIT)
+was run **zero-shot** on the same seeds through a drop-in chunk server
+(`runtime/omnivla_server.py`, same wire protocol; `run_eval.py --send-goal` passes the
+privileged goal via the client's new optional `goal_xy` param — off by default, SmolVLA runs
+unaffected):
+
+| seeds 9000–9009, same tracker/referee | success |
+|---|---|
+| expert | 10/10 |
+| SmolVLA stage1c_v3 (trained) | 3/10 |
+| OmniVLA-edge **language** (zero-shot) | 4/10 — misses drive 9–15 m *away* |
+| OmniVLA-edge **goal pose** (zero-shot, privileged) | **7/10** |
+
+Offline on identical frames: pose swap **12/12** (29.0° bearing response) vs language **2/12**
+(1.5° — no instruction sensitivity), while CLIP reads our prop colours at 9/11 on projected
+crops. So perception and driving are fine everywhere; *binding the word to steering* fails in
+every model tested — grounding belongs to the acquisition path (D9), the policy wants a goal
+channel (tasks 2.11–2.12: SmolVLA+goal-state vs fine-tuned OmniVLA-edge bake-off).
+4-panel comparisons: `compare4_seed900*.gif` (expert | SmolVLA | OmniVLA-lang | OmniVLA-pose).
+Closed-loop also hardened the chunk-executor contract (recovery arc instead of zero chunks —
+an all-zero chunk permanently parks the tracker; always-reply server errors; arrival stop
+inside the ring): see D10.
+
 **Built for the long-term fix** (task 5.1, pulled forward from M4):
 `rover_runtime/goal_memory_node.py` (odom-frame goal memory, emits the policy's `/waypoint_chunk`
 format so the tracker is unchanged) and `goal_projection.py` (bbox → body frame; ground-plane for
