@@ -71,6 +71,45 @@ def waypoint_chunk(track, t0, k=K_DEFAULT, dt=DT_DEFAULT):
     return chunk
 
 
+def waypoint_chunk_arclen(track, t0, k=K_DEFAULT, ds=0.125, cruise=0.5):
+    """K x (x, y, v) at fixed ds ARC-LENGTH spacing along the remaining path.
+
+    The early-stop fix (tasks 2.11 follow-up): time-parameterized labels
+    shrink toward a dot as the expert decelerates at the goal ring, teaching
+    the policy a stop it then fires ~30 cm early; closed-loop the tracker's
+    at_end latch turns that into a permanent park (frozen frame -> same
+    prediction). Arc-length labels keep full geometric extent until the path
+    physically ends, so there is no early stop to learn -- speed becomes the
+    executor's job. v is pinned at cruise; only waypoints clamped at the
+    path's end (the expert's in-ring stop point) carry v=0.
+    """
+    x0, y0, yaw0, _ = track.at(t0)
+    c, s = math.cos(-yaw0), math.sin(-yaw0)
+    pts = [(0.0, 0.0)]
+    cum = [0.0]
+    i = bisect.bisect_left(track.t, t0)
+    for r in track.rows[i:]:
+        dx, dy = r['x'] - x0, r['y'] - y0
+        bx, by = c * dx - s * dy, s * dx + c * dy
+        d = math.hypot(bx - pts[-1][0], by - pts[-1][1])
+        if d < 1e-3:            # skip stationary/jitter samples
+            continue
+        pts.append((bx, by))
+        cum.append(cum[-1] + d)
+    out = []
+    for j in range(1, k + 1):
+        sj = j * ds
+        if sj >= cum[-1]:       # past the path end: expert's stop point, v=0
+            out.append((pts[-1][0], pts[-1][1], 0.0))
+            continue
+        idx = bisect.bisect_right(cum, sj) - 1
+        a = (sj - cum[idx]) / (cum[idx + 1] - cum[idx])
+        out.append((pts[idx][0] + a * (pts[idx + 1][0] - pts[idx][0]),
+                    pts[idx][1] + a * (pts[idx + 1][1] - pts[idx][1]),
+                    cruise))
+    return out
+
+
 def goal_body(track, t0, goal_xy):
     """Commanded goal's world (x, y) -> (front, left) in the body frame at t0.
 

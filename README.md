@@ -19,7 +19,7 @@ sim-first) — see [rover/README.md](rover/README.md).
 | 2 | **Edge deployment** — Xavier NX on-device | ✅ | **233 ms/chunk** on the NX: from-source torch 2.2.2 (JP5), fp16 + manual full-forward CUDA-Graph capture, bitwise-identical actions (eager was 608 ms — launch-bound, not compute-bound) |
 | 2b | **Async inference** — the SmolVLA paper's Algorithm 1, reproduced honestly | ✅ | success parity with sync, **19–21 % faster time-to-success, zero idle ticks** with the NX serving (ℓ_S ≈ 0.25 s) |
 | 3 | **Production shape** — ROS 2 C++ async client; all-DDS policy hop | ✅ | C++ stack **80 %** @ native 25 Hz; all-ROS2 (Humble policy node on the NX ↔ Jazzy client over DDS) **80 %** — the rover's end-state architecture |
-| 4 | **Rover VLA (current)** — Ackermann waypoint policy, Gazebo sim-first | 🚧 M1 | grounding diagnosed → goal-conditioned pivot (D9/D10); reference model measured: pose-conditioned **7/10** zero-shot vs language 4/10 vs trained SmolVLA 3/10 |
+| 4 | **Rover VLA (current)** — Ackermann waypoint policy, Gazebo sim-first | 🚧 M1 | grounding solved by a goal channel (D9/D10): **SmolVLA+goal 7/10**, matching the OmniVLA-edge nav-pretrained reference; residual is the last-meter docking problem (D11), not grounding |
 
 Authoritative plans, designs, and per-task measurement records live in OpenSpec:
 [smolvla-edge-deployment](openspec/changes/smolvla-edge-deployment/) (38/38) ·

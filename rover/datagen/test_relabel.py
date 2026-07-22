@@ -7,7 +7,8 @@ Synthetic 50 Hz pose tracks with known geometry; run directly:
 
 import math
 
-from relabel import PoseTrack, goal_body, goal_state, waypoint_chunk
+from relabel import (PoseTrack, goal_body, goal_state, waypoint_chunk,
+                     waypoint_chunk_arclen)
 
 PASS = []
 FAIL = []
@@ -112,6 +113,52 @@ def test_goal_state():
     check('gs.zero_reserved', abs(0.0 ** 2 + 0.0 ** 2 - 1.0) > 0.5)
 
 
+def test_arclen():
+    """The key property: label geometry is INDEPENDENT of the speed profile.
+    A decelerating expert and a constant-speed expert on the same line must
+    produce identical waypoints -- that is exactly what time-parameterized
+    chunks violate near the goal (they shrink to a dot)."""
+    def pos_const(t):    # 0.5 m/s the whole way, stops at x=4 (t=8)
+        x = min(0.5 * t, 4.0)
+        return (x, 0.0, 0.0, 0.5 if x < 4.0 else 0.0, 0.0)
+
+    def pos_decel(t):    # same 4 m path, but linearly decelerating 1.0 -> 0
+        # x(t) = t - t^2/16 for t<8 (v = 1 - t/8), then parked at 4.0
+        x = t - t * t / 16.0 if t < 8.0 else 4.0
+        v = max(0.0, 1.0 - t / 8.0)
+        return (x, 0.0, 0.0, v, 0.0)
+
+    tr_c = PoseTrack(make_rows(pos_const, T=12.0))
+    tr_d = PoseTrack(make_rows(pos_decel, T=12.0))
+    ch_c = waypoint_chunk_arclen(tr_c, 0.0, k=10, ds=0.125)
+    ch_d = waypoint_chunk_arclen(tr_d, 0.0, k=10, ds=0.125)
+    for i, ((xc, yc, vc), (xd, yd, vd)) in enumerate(zip(ch_c, ch_d), 1):
+        check('arc.speed_invariant', abs(xc - xd) < 5e-3 and abs(yc - yd) < 5e-3,
+              f'wp{i} {xc:.4f} vs {xd:.4f}')
+        check('arc.spacing', abs(xc - 0.125 * i) < 5e-3, f'wp{i} x={xc}')
+        check('arc.cruise_v', vc == 0.5 and vd == 0.5, f'wp{i}')
+
+    # near the path end: waypoints past the stop clamp there with v=0
+    ch_end = waypoint_chunk_arclen(tr_c, 7.0, k=10, ds=0.125)  # 0.5 m left
+    for i, (x, y, v) in enumerate(ch_end, 1):
+        if 0.125 * i < 0.5 - 1e-6:
+            check('arc.end_pre', abs(x - 0.125 * i) < 5e-3 and v == 0.5, f'wp{i} x={x} v={v}')
+        else:
+            check('arc.end_clamp', abs(x - 0.5) < 5e-3 and v == 0.0, f'wp{i} x={x} v={v}')
+
+    # geometry follows a turn (quarter arc radius 2)
+    R = 2.0
+    tr_t = PoseTrack(make_rows(
+        lambda t: (R * math.sin(0.25 * t), R * (1 - math.cos(0.25 * t)),
+                   0.25 * t, 0.5 * math.cos(0.25 * t), 0.5 * math.sin(0.25 * t)),
+        T=6.0))
+    ch_t = waypoint_chunk_arclen(tr_t, 0.0, k=10, ds=0.125)
+    for i, (x, y, v) in enumerate(ch_t, 1):
+        th = 0.125 * i / R
+        check('arc.turn', abs(x - R * math.sin(th)) < 8e-3 and
+              abs(y - R * (1 - math.cos(th))) < 8e-3, f'wp{i} ({x:.3f},{y:.3f})')
+
+
 if __name__ == '__main__':
     test_straight()
     test_straight_rotated()
@@ -119,5 +166,6 @@ if __name__ == '__main__':
     test_stop()
     test_goal_body()
     test_goal_state()
+    test_arclen()
     print(f'{len(PASS)} checks passed, {len(FAIL)} failed')
     raise SystemExit(1 if FAIL else 0)

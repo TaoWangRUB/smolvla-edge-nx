@@ -148,7 +148,7 @@ def run_one(scene, seed, server_host, server_port, target_idx=0,
                             '--out', cfg_path],
                            capture_output=True, text=True)
         if r.returncode != 0:
-            return {'outcome': 'scene_failed', 'success': False}
+            return {'outcome': 'scene_failed', 'success': False}, None
         time.sleep(2.0)
     else:
         subprocess.run(['ros2', 'run', 'rover_sim', 'scene_manager.py',

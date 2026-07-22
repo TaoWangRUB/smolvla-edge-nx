@@ -505,3 +505,53 @@ path. 32 unit checks in `rover/runtime/omnivla_server.py`.
 2.11 is a data-only change on proven infrastructure); swapping SmolVLA's backbone for
 Kosmos-2/Florence-2 (surgery + A100 retraining aimed at binding, which the goal channel
 sidesteps); diffusion head (dominated by FM).
+
+## D11 — The last-meter problem: arrival assist is a stopgap, not the answer [added 2026-07-22]
+
+**What 2.11 exposed.** With the goal channel, SmolVLA drives to the *commanded* object reliably
+(the M1 failure is solved) but stops ~0.70–0.90 m out — just outside the 0.6 m success ring. Root
+cause is not grounding: the expert demos stop at the ring edge (~0.56 m), the policy imitates that
+stop, and the tracker's `at_end` latch parks ~0.15 m short of any chunk end. We closed it with an
+**arrival assist**: a ~10-line geometric override in the policy server that, in the final < 1 m and
+within ±60° of the goal bearing, discards the model's chunk and substitutes a straight run to
+0.40 m from goal with v→0 (realised stop 0.40–0.55 m, inside the ring). It works (0/10 → 7/10) and
+is the same executor treatment OmniVLA-edge got — but it is a **hand-coded controller**, and the
+literature names this exact stage.
+
+**This is the recognised "last-meter / last-mile navigation" problem** — the terminal phase between
+global planning and reaching a target, needing cm-level precision, where behaviour-cloned policies
+are weakest because covariate shift / compounding error is quadratic in horizon and bites hardest in
+the rare, precision-critical terminal states (SLING, *Last-Mile Embodied Visual Navigation*,
+arXiv:2211.11746; *Learning Category-level Last-meter Navigation*, arXiv:2512.11173). So the assist is
+a legitimate pattern (classical terminal controller + learned approach, as in residual-RL docking,
+arXiv:2407.16677), not a hack — but there are more principled fixes, in ROI order:
+
+1. **Remove speed from the action space (cheapest, highest-value).** Every freeze/early-stop in this
+   project — SmolVLA's *and* OmniVLA-edge's — is the policy exercising a learned stop lever (our v→0
+   label) at the wrong moment. Emit geometry only (x, y); let the executor set speed and the ring
+   stop from the goal-range channel it already has. This *deletes* the early-stop class by
+   construction and makes the "arrival assist" the policy's normal operating mode, not an override.
+   A `relabel.py` + serving change, no model surgery.
+
+2. **DAgger on terminal states (M2 task 3.2, now well-motivated).** The literature's direct answer to
+   compounding-error-at-the-tail: roll out the policy, relabel the states where it stops short with
+   expert actions that continue into the ring, retrain. The policy learns the correct terminal
+   approach and *no* hand-coded controller is needed. Cost: a rollout+relabel loop.
+
+3. **Goal-range-conditioned stop, never a pixel stop.** Object-nav's learned STOP/DONE action is
+   documented to false-positive badly without depth (Habitat challenge writeups) — a *pixel-judged*
+   "am I there yet" is exactly what fails here. We must condition stopping on the **goal-range** the
+   mission layer provides (odom-frame, reliable), which is what (1) does implicitly. Do NOT replace
+   the assist with a naive learned pixel stop; it would regress.
+
+4. **Geometric last-meter servo (SLING-style).** Replace the fixed straight-line assist with a
+   proper visual/geometric servo on the detector's goal pose held in odom — the arrival assist done
+   right, still outside the network, robust to approach angle (fixes the ±60° guard and the
+   goal-off-to-the-side freezes).
+
+**Decision.** Keep the arrival assist as the working baseline for the 2.12 bake-off (both arms use
+it, comparison stays fair). For M2, pursue (1) as the real fix — geometry-only actions + executor
+speed/stop — with (2) DAgger folding in the terminal states; (4) is the deployment-grade arrival
+controller. Reject a learned pixel stop (3, false-positive-prone). The through-line matches D9/D3:
+the policy does *navigation*, the mission/executor layer does *docking* — the last 15 cm is a
+geometry problem and does not belong in the network.
