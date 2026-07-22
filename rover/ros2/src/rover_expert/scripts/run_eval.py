@@ -139,7 +139,8 @@ def instruction_for(prop):
 
 
 def run_one(scene, seed, server_host, server_port, target_idx=0,
-            instruction=None, reset_scene=True, trace_dir=None):
+            instruction=None, reset_scene=True, trace_dir=None,
+            send_goal=False):
     cfg_path = f'/tmp/eval_cfg_{scene}_{seed}.json'
     if reset_scene:
         r = subprocess.run(['ros2', 'run', 'rover_sim', 'scene_manager.py',
@@ -158,16 +159,37 @@ def run_one(scene, seed, server_host, server_port, target_idx=0,
     task = instruction or instruction_for(cfg['props'][target_idx])
 
     tracker = start_node('rover_runtime', 'tracker_node.py', {})
-    client = start_node('rover_runtime', 'chunk_client_node.py', {
+    client_params = {
         'server_host': server_host, 'server_port': server_port,
         'instruction': task,
-    })
+    }
+    if send_goal:
+        # PRIVILEGED: hands the commanded prop's world position to the policy,
+        # for measuring a pose-conditioned upper bound. Never set for a
+        # language-grounding evaluation.
+        g = cfg['props'][target_idx]
+        client_params['goal_xy'] = f'{g["x"]},{g["y"]}'
+    client = start_node('rover_runtime', 'chunk_client_node.py', client_params)
     time.sleep(1.0)
 
     rclpy.init()
     ref = Referee(cfg, target_idx)
+    # Wall-clock backstop. The Referee's own 40 s cutoff is SIM-time and fires
+    # from its /clock + /gt_odom callbacks; if those stall (leaked nodes
+    # starving the executor, a wedged sim clock) the loop below never exits,
+    # run_one never returns, and stop_node() never runs -- so the tracker and
+    # client leak, load climbs, and the next run's teardown lags too. That
+    # runaway is what turned a 13 min eval into 90 min on one seed. A generous
+    # wall cap (sim TIMEOUT_S / lowest expected RTF, + startup slack) guarantees
+    # every run_one returns and tears its nodes down.
+    wall_deadline = time.time() + 90.0
     while rclpy.ok() and ref.result is None:
         rclpy.spin_once(ref, timeout_sec=0.5)
+        if time.time() > wall_deadline:
+            ref.result = {'outcome': 'wall_timeout', 'success': False,
+                          'time_s': None, 'min_clearance_m': None,
+                          'nearest_prop': None, 'dist_to_target': None}
+            break
     rclpy.shutdown()
 
     stop_node(client)
@@ -212,6 +234,9 @@ def main():
     ap.add_argument('--server-host', default='127.0.0.1')
     ap.add_argument('--server-port', type=int, default=8790)
     ap.add_argument('--trace-dir', help='dump per-episode pose traces for GIF rendering')
+    ap.add_argument('--send-goal', action='store_true',
+                    help='PRIVILEGED: send the commanded goal pose to the policy '
+                         '(pose-conditioned upper bound, not a grounding test)')
     args = ap.parse_args()
 
     n_ok = 0
@@ -219,7 +244,7 @@ def main():
     for i in range(args.episodes):
         seed = args.seed0 + i
         res, cfg = run_one(args.scene, seed, args.server_host, args.server_port,
-                           trace_dir=args.trace_dir)
+                           trace_dir=args.trace_dir, send_goal=args.send_goal)
         print(json.dumps(res), flush=True)
         n_ok += bool(res['success'])
         if args.swap:
@@ -228,7 +253,7 @@ def main():
                 continue
             res2, _ = run_one(args.scene, seed, args.server_host,
                               args.server_port, target_idx=alt,
-                              trace_dir=args.trace_dir)
+                              trace_dir=args.trace_dir, send_goal=args.send_goal)
             print(json.dumps(res2), flush=True)
             swap_pairs += 1
             a_ok = res['success'] and res['nearest_prop'] == res['target']
