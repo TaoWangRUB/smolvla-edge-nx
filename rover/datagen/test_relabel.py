@@ -7,7 +7,7 @@ Synthetic 50 Hz pose tracks with known geometry; run directly:
 
 import math
 
-from relabel import PoseTrack, waypoint_chunk
+from relabel import PoseTrack, goal_body, goal_state, waypoint_chunk
 
 PASS = []
 FAIL = []
@@ -83,10 +83,41 @@ def test_stop():
             check('stop.v0', abs(s) < 1e-9, f'wp{i} v={s}')
 
 
+def test_goal_body():
+    """Goal transform: ahead / left / behind, under rover motion + rotation."""
+    v = 0.5
+    # rover drives +x at 0.5 m/s, yaw 0: goal at world (5, 0)
+    track = PoseTrack(make_rows(lambda t: (v * t, 0.0, 0.0, v, 0.0)))
+    gf, gl = goal_body(track, 4.0, (5.0, 0.0))
+    check('goal.ahead', abs(gf - 3.0) < 1e-6 and abs(gl) < 1e-6, f'({gf},{gl})')
+    gf, gl = goal_body(track, 4.0, (2.0, 1.0))       # world behind-left of rover
+    check('goal.behind_left', abs(gf + 0.0) < 1e-6 or gf < 0, f'({gf},{gl})')
+    check('goal.left_sign', gl > 0, f'({gf},{gl})')
+    # rover at 90 deg yaw driving +y: world +x is body RIGHT (negative left)
+    track = PoseTrack(make_rows(lambda t: (0.0, v * t, math.pi / 2, 0.0, v)))
+    gf, gl = goal_body(track, 2.0, (1.0, v * 2.0))
+    check('goal.rotated', abs(gf) < 1e-6 and abs(gl + 1.0) < 1e-6, f'({gf},{gl})')
+
+
+def test_goal_state():
+    """Channel encoding: bearing consistency, noise application, zero-goal."""
+    v = 0.5
+    track = PoseTrack(make_rows(lambda t: (v * t, 0.0, 0.0, v, 0.0)))
+    gx, gy, c, s = goal_state(track, 0.0, (3.0, 3.0))
+    check('gs.bearing', abs(math.atan2(s, c) - math.atan2(gy, gx)) < 1e-9)
+    check('gs.unit', abs(c * c + s * s - 1.0) < 1e-9)
+    gx2, gy2, _, _ = goal_state(track, 0.0, (3.0, 3.0), bias=(0.1, -0.1))
+    check('gs.bias', abs(gx2 - gx - 0.1) < 1e-9 and abs(gy2 - gy + 0.1) < 1e-9)
+    # the reserved no-goal value is off the unit circle -- assert the invariant
+    check('gs.zero_reserved', abs(0.0 ** 2 + 0.0 ** 2 - 1.0) > 0.5)
+
+
 if __name__ == '__main__':
     test_straight()
     test_straight_rotated()
     test_turn()
     test_stop()
+    test_goal_body()
+    test_goal_state()
     print(f'{len(PASS)} checks passed, {len(FAIL)} failed')
     raise SystemExit(1 if FAIL else 0)

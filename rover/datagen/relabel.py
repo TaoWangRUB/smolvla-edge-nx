@@ -71,6 +71,36 @@ def waypoint_chunk(track, t0, k=K_DEFAULT, dt=DT_DEFAULT):
     return chunk
 
 
+def goal_body(track, t0, goal_xy):
+    """Commanded goal's world (x, y) -> (front, left) in the body frame at t0.
+
+    The static-point counterpart of waypoint_chunk's transform: this is what
+    goal_memory_node computes online from the odom-frame goal, produced here
+    in hindsight for the goal-state training channel (task 2.11 / design D10).
+    """
+    x0, y0, yaw0, _ = track.at(t0)
+    dx, dy = goal_xy[0] - x0, goal_xy[1] - y0
+    c, s = math.cos(-yaw0), math.sin(-yaw0)
+    return c * dx - s * dy, s * dx + c * dy
+
+
+def goal_state(track, t0, goal_xy, bias=(0.0, 0.0), jitter=(0.0, 0.0)):
+    """4-dim goal channel [gx, gy, cos psi, sin psi], psi = bearing to goal.
+
+    bias is a per-episode offset (detector/projection systematic, held fixed
+    while the rover moves -- goal memory stores one acquisition), jitter is
+    per-frame noise. All-zeros is the reserved "no goal" value ((0,0) for
+    cos/sin is off the unit circle, so it never occurs naturally): emitted by
+    the converter's goal-dropout episodes so the policy keeps a language-only
+    operating mode (OmniVLA's modality-dropout recipe).
+    """
+    gf, gl = goal_body(track, t0, goal_xy)
+    gf += bias[0] + jitter[0]
+    gl += bias[1] + jitter[1]
+    psi = math.atan2(gl, gf)
+    return [gf, gl, math.cos(psi), math.sin(psi)]
+
+
 def episode_chunks(episode_dir, k=K_DEFAULT, dt=DT_DEFAULT):
     """(frame_t, chunk) for every recorded frame."""
     track = PoseTrack(read_jsonl(f'{episode_dir}/gt_pose.jsonl'))
