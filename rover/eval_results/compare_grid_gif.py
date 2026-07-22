@@ -37,20 +37,29 @@ def split_compare(path):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument('--compare', required=True, help='existing 2-panel compare_seed*.gif')
-    ap.add_argument('--lang', required=True, help='OmniVLA-edge language-conditioned overview')
-    ap.add_argument('--pose', required=True, help='OmniVLA-edge pose-conditioned overview')
+    ap.add_argument('--compare', required=True, help='2-panel compare_seed*.gif; '
+                    'its left panel supplies the EXPERT cell, right the ORIGINAL cell')
+    ap.add_argument('--lang', required=True, help='bottom-left overview gif')
+    ap.add_argument('--pose', required=True, help='bottom-right overview gif')
     ap.add_argument('--out', required=True)
     ap.add_argument('--fps', type=int, default=10)
+    ap.add_argument('--labels', default=None,
+                    help='4 pipe-separated cell labels: TL|TR|BL|BR '
+                         '(default: the OmniVLA reference-eval labels)')
     a = ap.parse_args()
 
     exp, smol = split_compare(a.compare)
     lang, pose = frames_of(a.lang), frames_of(a.pose)
+    if a.labels:
+        L = a.labels.split('|')
+    else:
+        L = ['EXPERT (privileged A*)', 'SMOLVLA stage1c_v3',
+             'OMNIVLA-EDGE  language', 'OMNIVLA-EDGE  goal pose (privileged)']
     cells = [
-        (exp,  'EXPERT (privileged A*)',            (120, 240, 120)),
-        (smol, 'SMOLVLA stage1c_v3',                (120, 190, 255)),
-        (lang, 'OMNIVLA-EDGE  language',            (255, 200, 100)),
-        (pose, 'OMNIVLA-EDGE  goal pose (privileged)', (240, 150, 240)),
+        (exp,  L[0], (120, 240, 120)),
+        (smol, L[1], (120, 190, 255)),
+        (lang, L[2], (255, 200, 100)),
+        (pose, L[3], (240, 150, 240)),
     ]
     n = max(len(c[0]) for c in cells)
     W = CELL_W * 2 + GAP

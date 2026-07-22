@@ -1,11 +1,8 @@
 data/
-demo_*.gif
 overview_*.gif
 colab_upload/
-compare_*.gif
-compare4_*.gif
-_ovgifs/
 eval_results/clip_crops/
-gifs_v3g2/
-eval_traces_v3g2*/
-eval_traces_v3g_*/
+
+# eval result gifs (local artifacts; hero gif force-added for the README)
+gifs/
+!gifs/full4_9006.gif
