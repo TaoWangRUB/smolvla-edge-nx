@@ -1,655 +1,132 @@
-# SmolVLA on the Edge — Deploying a Flow-Matching VLA on 8 GB Jetson Xavier NX
+# SmolVLA on the Edge — Flow-Matching VLA on an 8 GB Jetson Xavier NX
 
-Fine-tune [SmolVLA](https://huggingface.co/lerobot/smolvla_base) on a public SO-101
-manipulation dataset, then **deploy and benchmark it on a Jetson Xavier NX (8 GB)** — the
-part most tutorials skip.
+Deploy a language-conditioned flow-matching VLA under real-time, on-device, 8 GB edge
+constraints — and be honest about *what converts, what doesn't, and the latency budget you
+hit anyway*. Fine-tuning is table-stakes; the engineering is everything after it.
 
-> **The thesis of this repo:** fine-tuning a VLA is table-stakes. The interesting,
-> portfolio-worthy engineering is getting a SmolVLM-2 + flow-matching-expert policy to run
-> under real-time, on-device, 8 GB edge constraints — and being honest about *what converts,
-> what doesn't, and the latency budget you hit anyway.*
-
-No robot arm required: SmolVLA fine-tunes from public Hugging Face datasets, and evaluation
-runs **closed-loop in the gym-aloha MuJoCo simulator** (plus open-loop replay as a fallback).
-The Xavier NX edge phase is complete — the fine-tuned SmolVLA runs on-device on a Jetson Xavier
-NX (8 GB) at **233 ms/chunk** (native from-source PyTorch, fp16 + full-forward CUDA Graph
-capture, bitwise-identical actions); the pure-Python ONNX Runtime GPU fallback path runs
-~610 ms/chunk. The closed loop was measured with the NX serving over both gRPC (async 70%,
-zero idle) and a fully **ROS 2** policy hop (Humble rclpy node on the NX ↔ Jazzy C++ client
-over DDS, 80%) — the rover's end-state architecture. See the deployment sections.
+The project is sim-first (no robot arm required) and proceeds in phases, each gated on
+measured numbers. Manipulation phases 0–3 are **complete**; the current phase adapts the
+same stack to a **1/16 Ackermann rover** (language-conditioned navigation, Gazebo
+sim-first) — see [rover/README.md](rover/README.md).
 
 ---
 
-## Demo — the fine-tuned SmolVLA doing the task, with its latency on screen
+## Project arc
 
-![This repo's fine-tuned SmolVLA running the bimanual cube transfer closed-loop, with sim-time, control rate, per-step policy latency and task reward overlaid](benchmarks/results/demo_smolvla.gif)
+| Phase | What | Status | Headline number |
+|---|---|---|---|
+| 1 | **Correctness (sim)** — fine-tune SmolVLA on ALOHA transfer-cube, closed-loop eval | ✅ | **70 %** success (20 eps) vs 65 % ACT baseline — the 450M generalist beats the 80M specialist |
+| 2 | **Edge deployment** — Xavier NX on-device | ✅ | **233 ms/chunk** on the NX: from-source torch 2.2.2 (JP5), fp16 + manual full-forward CUDA-Graph capture, bitwise-identical actions (eager was 608 ms — launch-bound, not compute-bound) |
+| 2b | **Async inference** — the SmolVLA paper's Algorithm 1, reproduced honestly | ✅ | success parity with sync, **19–21 % faster time-to-success, zero idle ticks** with the NX serving (ℓ_S ≈ 0.25 s) |
+| 3 | **Production shape** — ROS 2 C++ async client; all-DDS policy hop | ✅ | C++ stack **80 %** @ native 25 Hz; all-ROS2 (Humble policy node on the NX ↔ Jazzy client over DDS) **80 %** — the rover's end-state architecture |
+| 4 | **Rover VLA (current)** — Ackermann waypoint policy, Gazebo sim-first | 🚧 M1 | grounding diagnosed → goal-conditioned pivot (D9/D10); reference model measured: pose-conditioned **7/10** zero-shot vs language 4/10 vs trained SmolVLA 3/10 |
 
-**What you're watching.** This repo's **fine-tuned SmolVLA** completing the bimanual cube
-transfer **closed-loop** in `gym_aloha/AlohaTransferCube-v0`, rendered by the eval harness
-(`scripts/make_demo_gif.py --mode rollout`). Not a replayed demonstration — every action is
-produced by the network from the current camera image + joint state.
+Authoritative plans, designs, and per-task measurement records live in OpenSpec:
+[smolvla-edge-deployment](openspec/changes/smolvla-edge-deployment/) (38/38) ·
+[ros2-cpp-async-deployment](openspec/changes/ros2-cpp-async-deployment/) (34/34) ·
+[rover-vla-sim-first](openspec/changes/rover-vla-sim-first/) (active).
 
-- **Model:** SmolVLA, 450 M params (SmolVLM-2 backbone + flow-matching action expert),
-  language-conditioned — instruction: *"Pick up the cube with the right arm and transfer it
-  to the left arm."*
-- **Fine-tune:** single **Colab A100**, **20 k steps**, batch 64, **~2.5 h**
-  (`notebooks/colab_train_smolvla_aloha.ipynb`)
-- **Scene:** two ViperX arms (14 DoF total), one 480×640 top camera
-- **Result:** **70 % success** over 20 episodes — vs 65 % for the ACT baseline (see Results)
+---
 
-**Timing, plainly.** The robot runs a **50 Hz control loop**: it needs one action every
-**20 ms**. SmolVLA does not run its network every step — one full inference produces a
-**chunk of 50 actions**, which are then executed one per control step. So each control step
-is one of two kinds (all times measured on the RTX 2000 Ada by the CUDA-synced per-step
-timer shown in the GIF header):
+## Demo — the fine-tuned SmolVLA, latency on screen
 
-- **Replay step (49 out of every 50): ~5–7 ms.** The robot executes a precomputed action
-  from the chunk — **no neural network runs**. The 5–7 ms is purely our harness preparing
-  the *next* observation (camera image → tensor → GPU, tokenize the instruction, normalize).
-  On these steps that preparation is even discarded — a known optimization to reclaim.
-- **Inference step (1 out of every 50): ~300 ms.** The full model runs once: the SmolVLM-2
-  backbone encodes image + instruction + state, then the flow-matching action expert
-  integrates 10 steps to produce the next 50 actions.
+![Fine-tuned SmolVLA running bimanual cube transfer closed-loop with per-step latency overlaid](benchmarks/results/demo_smolvla.gif)
 
-The arithmetic that follows from this:
-- 50 actions ÷ 50 Hz → **one chunk covers exactly 1 s of robot motion**, so the full
-  network runs **once per second** — that (and nothing else) is the "VLM at 1 Hz" claim.
-- 300 ms ÷ 50 actions = **6 ms of compute per executed action**, under the 20 ms budget —
-  the GPU keeps up on average.
-- But at each inference step the robot would stand still for **300 ms = 15 missed control
-  ticks** if prediction and execution were serialized. Decoupling them (compute the next
-  chunk while the current one is still executing) hides the stall — doing that within 8 GB
-  is Phase 2's job.
+Closed-loop in `gym_aloha/AlohaTransferCube-v0` — every action from the network, not a
+replay. The rhythm visible in the header *is* action chunking:
 
-For comparison, the **ACT baseline** (~52 M task-specific specialist) through the identical
-harness — far cheaper per step, but no language conditioning and a lower success rate (see
-Results):
+- **50 Hz control loop**, one action per 20 ms tick; one inference yields a **50-action chunk**.
+- **Replay steps** (49 of 50): ~5–7 ms — no network runs. **Inference steps** (1 of 50):
+  ~300 ms — SmolVLM-2 prefill + 10 flow-matching steps.
+- 300 ms ÷ 50 actions = 6 ms/action: the GPU keeps up *on average*, but serialized it would
+  stall 15 ticks at every chunk boundary — hiding that stall is what the async phase solves.
 
-![The pretrained ACT baseline running the same task through the same harness](benchmarks/results/demo.gif)
+Regenerate: `python scripts/make_demo_gif.py --mode rollout --policy-path <ckpt> --task "<instruction>"`.
 
-**The header, field by field:**
+---
 
-| field | meaning |
+## What was measured (the findings that transfer)
+
+**Edge latency is a dispatch problem before it is a compute problem.** Eager fp16 on the NX
+(608 ms) ran the GPU ~20 % busy — the Carmel CPU couldn't dispatch kernels fast enough.
+Manual `torch.cuda.CUDAGraph` capture of the entire forward (static shapes: fixed camera,
+padded tokens, 3 flow steps, injectable noise) gave **233 ms end-to-end, bitwise-identical
+actions**. Runtime-level fusion lost: the ONNX/TorchDynamo export is 30 852 unfused nodes
+(~1.0 s in C++ ORT), TensorRT rejects the graph — recording the framework's own kernel
+stream beat every export path. Recipe productionized as `precision="fp16-graph"`
+(`src/smolvla_edge/cuda_graph.py`); details in
+[deploy/jetson-native-torch/README.md](deploy/jetson-native-torch/README.md) and
+[deploy/README.md](deploy/README.md).
+
+**Async has a hard operating envelope.** No-starvation and no-perpetual-replanning together
+require in-loop chunk latency **ℓ < n·Δt/2** (500 ms at n=50, 50 Hz) — outside it no
+threshold `g` works (measured: 45 % vs sync's 65 % at ℓ ≈ 0.9 s). And deep chunk splices
+need seam smoothing: without `--ramp-in`, the executed-vs-new seam is a torque spike that
+cost 30 points of success. Both findings, with queue traces matching the paper's Fig. 3,
+are recorded in the [edge-deployment design](openspec/changes/smolvla-edge-deployment/design.md).
+
+**The simulator version is part of the eval.** The same ACT checkpoint scores 80 % under the
+matched mujoco 2.3.7 container vs 60 % under host mujoco 3.x — hence the pinned
+py3.11 + lerobot 0.4.4 + mujoco 2.3.7 image everything runs in.
+
+| Tier (fine-tuned SmolVLA unless noted) | Number |
 |---|---|
-| `sim t` | simulated time (steps × 20 ms). On a physical robot this trajectory would take the same wall-clock time — the whole handover is ~6.5 s |
-| `50 Hz` | the control loop: one action consumed every 20 ms of sim time |
-| `policy X ms` | wall time to obtain **that step's** action (CUDA-synced, RTX 2000 Ada). SmolVLA: ~5–7 ms queue pops, **~300 ms** chunk-boundary refills. ACT baseline: ~1 ms pops, ~14 ms refills. That pop-vs-refill rhythm *is* action chunking |
-| `reward N/4` | gym-aloha's contact-based progress ladder: 1 = right gripper touches the cube, 2 = lifted off the table, 3 = left gripper touches it, 4 = left arm holds it alone → **SUCCESS**. An episode counts as a success iff it reaches 4 |
+| RTX 2000 Ada, PyTorch fp32 | ~300 ms/chunk |
+| RTX A2000, fp16-graph | 53 ms/chunk |
+| Xavier NX, ORT CUDA EP fp32 (torch-free fallback) | ~610 ms/chunk |
+| **Xavier NX, native torch fp16-graph** | **233 ms/chunk** |
+| NX-served closed loop, async g=0.5 | 70 % success, 0 idle ticks |
+| ROS2 C++ client, native Linux 25 Hz, 50 eps | 80 % success |
+| All-ROS2 (Humble node on NX ↔ Jazzy over DDS), 10 eps | 80 % success |
 
-After success the sim runs ~1.5 s longer (so the GIF doesn't cut at the handover instant) and
-holds the final frame. Regenerate with any checkpoint:
-`python scripts/make_demo_gif.py --mode rollout --policy-path <ckpt> --task "<instruction>"`.
-
----
-
-## Why this project
-
-The role this targets emphasizes *real-time / on-device / edge constraints* and *strong
-latency on real robots*. Almost every SmolVLA example deploys to a workstation or a physical
-arm; very few tell the **8 GB Jetson optimization story**. This repo owns exactly that gap.
-
-Effort is weighted accordingly: get a *correct* checkpoint fast, then spend the real time on
-edge deployment and latency engineering.
+Full tier table: [benchmarks/README.md](benchmarks/README.md) ·
+[benchmarks/results/](benchmarks/results/).
 
 ---
 
-## Track scope
+## Current phase — rover VLA, simulation-first
 
-- **In scope — manipulation in simulation (ALOHA sim).** With no robot on hand, the correctness
-  loop runs entirely in the LeRobot-native gym-aloha MuJoCo env: fine-tune on
-  `lerobot/aloha_sim_insertion_human`, evaluate **closed-loop** with the env's own success flag.
-  The real SO-101 path (`configs/train.so101_pickplace.yaml`) is kept for when hardware exists.
-- **Jetson Xavier NX edge deployment (Phase 2, now live).** A Jetson Xavier NX (8 GB) is on hand:
-  the fine-tuned SmolVLA runs on-device at **233 ms/chunk** via native from-source PyTorch with
-  fp16 + manual CUDA Graph capture (2.6× over eager, bitwise-identical actions); the pure-Python
-  ONNX Runtime GPU path (~610 ms/chunk, fp32) is the torch-free fallback — see
-  [On-device on the Xavier NX](#on-device-on-the-xavier-nx--first-measured-number). The on-device
-  async stack remains.
-- **Future work — mobile rover.** A rover is a different embodiment (mobile base, not an arm).
-  Adapting SmolVLA to it is a research project, not a two-week demo. See the *Non-Goals* in
-  [the change design](openspec/changes/smolvla-edge-deployment/design.md).
+The manipulation stack's end-state (on-device policy node, DDS policy hop, async chunks)
+is the rover's starting architecture. New problem: *"drive to the red barrel"* → safe
+Ackermann motion — body-frame waypoint chunks from a camera + instruction, developed in
+Gazebo Harmonic against a privileged A* expert, with a swap test (same scene, instruction
+on goal vs hard negative) as the grounding centerpiece.
 
----
+Status (M1): navigation works, **end-to-end language grounding does not — in any model
+tested**. Six interventions on SmolVLA left the swap test at chance; the released
+OmniVLA-edge navigation specialist (9× smaller) scored 12/12 offline / 7/10 closed-loop
+when given a **goal pose** but 2/12 / 4/10 on language, on identical frames — while CLIP
+reads the prop colours fine (9/11). The failure is isolated to binding words to spatial
+targets inside the policy; the measured escape is the mission-layer split: an
+open-vocabulary detector *selects* (94 % offline), goal memory persists the target in the
+odom frame, and the policy *steers* on a goal channel (design D9/D10, tasks 2.10–2.12).
 
-## Roadmap
-
-Progress: **complete** — [smolvla-edge-deployment](openspec/changes/smolvla-edge-deployment/tasks.md)
-38/38 tasks, [ros2-cpp-async-deployment](openspec/changes/ros2-cpp-async-deployment/tasks.md) 34/34 tasks.
-
-**Headline result — the head-to-head is in: the fine-tuned SmolVLA wins.** On
-`AlohaTransferCube-v0`, identical 20-episode protocol, matched simulator:
-**SmolVLA 14/20 = 70 %** vs **ACT baseline 13/20 = 65 %** — the language-conditioned
-generalist beats the task-specific specialist, at ~40× the inference compute. The SmolVLA
-checkpoint was fine-tuned on a **single Colab A100** (20 k steps, batch 64, ~2.5 h); all
-evaluation and latency numbers below come from the local RTX 2000 Ada container. That compute
-gap (36 Hz ceiling vs the 50 Hz control loop) is exactly what the edge phase exists to close.
-
-| Phase | What | Status | Notes |
-|-------|------|--------|-------|
-| 0 | **Scaffold + environment** — repo, pins, host env, **Docker env** | ✅ 6/6 | matched-mujoco container built & verified |
-| 1 | **Correctness (sim)** — verify-first, fine-tune SmolVLA, closed-loop eval | ✅ 6/6 | **Deliverable: fine-tuned SmolVLA 70 % success** (transfer cube, 20 eps, matched mujoco) vs official ACT baseline **65 %** on identical seeds; trained 20k steps on Colab A100 |
-| 2 | **Edge deployment** — Xavier NX on-device + client/server | ✅ 8/8 | **On-device solved: 233 ms/chunk** — native from-source torch 2.2.2 (JP5 "impossible" build), fp16 + **manual CUDA Graph capture of the full forward** (608 → 233 ms, bitwise-exact), productionized as `precision="fp16-graph"`. **Closed-loop from the NX: async 70% @ 259 ticks, 0 idle** (vs sync 70% @ 329) at in-loop ℓ_S ≈ 0.25 s. Torch-free fallback: pure-Python ORT GPU ~610 ms |
-| 3 | **Benchmarks + writeup** — latency table + demo GIF + narrative | ✅ 5/5 | demo GIFs, 12-tier `summary.csv` (local A2000 / NX on-device / NX-served closed-loop, incl. `action_chunk_hz`), conversion log (`deploy/ondevice/conversion_notes.md`), narrative through the edge phase |
-
-**Measured so far** (evaluated on RTX 2000 Ada, matched-mujoco container; SmolVLA trained on a Colab A100):
-
-| | ACT (80 M specialist, official pretrained) | SmolVLA (450 M generalist, fine-tuned on A100) |
-|---|---|---|
-| transfer-cube success (20 eps) | 65 % | **70 %** |
-| select_action mean / throughput | 0.68 ms / 1474 Hz | 27.7 ms / 36 Hz (chunk-boundary VLM prefill dominates) |
-| peak GPU memory | 266 MB | 927 MB |
-
-**Failure modes** (for the writeup): SmolVLA's 6 failures were mostly post-grasp stalls
-(reward 1–2); ACT's included one complete miss (reward 0). Neither drops the cube post-transfer.
-Two transferable findings: (1) **the simulator version is part of the eval** — the same ACT
-checkpoint scores 60 % under mujoco 3.10 vs 80 % under the matched 2.3.7 container; (2)
-**verify-first pays** — one pretrained-policy rollout caught a normalization bug that silently
-zeroed success rates before any GPU-hours were spent.
-
-Training pipeline hardening from the Colab sessions (HF Xet downloads unreliable from Colab →
-datasets/models staged from Drive tarballs; full findings in
-[the change design](openspec/changes/smolvla-edge-deployment/design.md)).
+Everything — vehicle sim, expert datagen, training recipes, eval harness, the grounding
+diagnosis, and the per-decision record — lives in [rover/README.md](rover/README.md) and
+[openspec/changes/rover-vla-sim-first/](openspec/changes/rover-vla-sim-first/).
 
 ---
 
-## Environment
+## Quickstart
 
-### Docker (preferred) — matched-simulator container
-
-The recommended way to run everything (sim eval, inference, fine-tuning, benchmarks) is the
-Docker environment: [docker/Dockerfile](docker/Dockerfile) + [docker-compose.yml](docker-compose.yml),
-following the same conventions as the BEV_Jetson / rover projects (nvidia runtime, repo mounted
-at `/workspace`, per-purpose compose services).
-
-**Why a container is not just convenience here — it fixes a real version conflict:**
-
-- `lerobot >= 0.5.0` requires **Python ≥ 3.12**
-- gym-aloha's pinned `mujoco 2.3.7` (the version the ALOHA sim datasets/checkpoints were
-  generated with) only has wheels for **Python ≤ 3.11**
-
-These are mutually exclusive in one native env. The container runs **py3.11 + lerobot 0.4.4 +
-the matched mujoco 2.3.7 / dm_control 1.0.14 pair** — and the match is measurable: the pretrained
-ACT transfer-cube checkpoint scores **80 % success in-container vs 60 % on a host mujoco 3.x**
-stack. Details in [the change design](openspec/changes/smolvla-edge-deployment/design.md)
-(*"Simulation setup — verified findings"*).
-
-Prerequisites: Docker with the NVIDIA container runtime (`docker info | grep -i nvidia`).
-Compose v2 (`docker compose`) or legacy v1 (`docker-compose`) both work.
+Docker with the NVIDIA runtime; the container fixes a real conflict (lerobot ≥ 0.5 wants
+py ≥ 3.12; the matched mujoco 2.3.7 has wheels only ≤ 3.11).
 
 ```bash
-docker compose build                    # build the smolvla-edge:sim image (once, ~8 GB)
+docker compose build                    # smolvla-edge:sim (~8 GB, once)
+docker compose run --rm verify          # pretrained ACT baseline -> ~80% (verify-first)
+docker compose run --rm infer           # smoke-test smolvla_base
+docker compose run --rm train           # fine-tune (big GPU; Colab notebook provided)
 
-docker compose run --rm verify          # known-good baseline: pretrained ACT on transfer cube
-                                        #   -> expect ~80% success (4/5 episodes)
-
-docker compose run --rm shell           # interactive shell inside the container
-
-# generic eval — pass any smolvla_edge.eval flags via EVAL_ARGS:
-EVAL_ARGS="--mode sim --policy-path lerobot/act_aloha_sim_insertion_human \
-           --env-id gym_aloha/AlohaInsertion-v0 --episodes 10 --task ''" \
-  docker compose run --rm eval
-
-docker compose run --rm infer           # smoke-test smolvla_base on its SO-101 dataset
-docker compose run --rm train           # fine-tune via scripts/train.sh (needs a big GPU)
-BENCH_ARGS="--policy-path <ckpt> --precision fp16" docker compose run --rm bench
-```
-
-Notes:
-- The repo root is mounted at `/workspace`; edits on the host are live in the container.
-- Model/dataset downloads persist across runs in the `hf-cache` / `torch-cache` volumes.
-- Headless rendering uses `MUJOCO_GL=egl` (GPU). If EGL is unavailable:
-  `MUJOCO_GL=osmesa docker compose run --rm verify` (CPU rendering, slower).
-- Set `HF_TOKEN=...` in the environment for authenticated/faster HF downloads.
-
-### Native (host) install — alternative
-
-A host install works too, but which mujoco you get depends on the Python version, and
-**mujoco 3.x will under-score checkpoints/datasets generated under 2.x** (see above):
-
-```bash
-# Python 3.10/3.11: requirements.txt works as-is (matched mujoco 2.3.7)
-pip install -r requirements.txt && sudo apt-get install -y ffmpeg
-
-# Python 3.12: gym-aloha's mujoco pin has no wheel — use the verified workaround
-bash scripts/setup_sim.sh               # lerobot 0.5.0 + mujoco 3.x + gym-aloha --no-deps
-```
-
-### Hardware
-
-- **Dev + inference:** any CUDA GPU (verified on an RTX 2000 Ada laptop GPU, WSL2).
-- **Training run:** rent an A100/H100 for a few hours (≈20k steps ≈ 4 h on a single A100).
-- **Edge target (optional):** Jetson Xavier NX, 8 GB — see the *Xavier NX (JetPack) setup*
-  section of [the change design](openspec/changes/smolvla-edge-deployment/design.md); the Jetson
-  is its own world (aarch64 wheels, TensorRT, power modes) and does not use this image.
-
----
-
-## Quickstart (Docker)
-
-```bash
-# 0. Build the image, then prove the whole sim/eval pipeline with a pretrained policy
-#    BEFORE training anything (verify-first): env, rollout, normalization, success metric.
-docker compose build
-docker compose run --rm verify          # pretrained ACT, transfer cube -> ~80% success
-
-# 1. Smoke-test the SmolVLA base model (pairs with its SO-101 embodiment dataset).
-docker compose run --rm infer
-
-# 2. Fine-tune SmolVLA on the ALOHA sim dataset (run on a big GPU; see configs/train.aloha_sim.yaml).
-#    Local smoke run: BATCH_SIZE=4 STEPS=1000 docker compose run --rm train
-#    Full 20k-step run on Colab: notebooks/colab_train_smolvla_aloha.ipynb (same lerobot
-#    version as the container -> the checkpoint drops straight into eval below)
-docker compose run --rm train
-
-# 3. Evaluate YOUR checkpoint closed-loop in sim -> the success-rate deliverable.
+# closed-loop eval of your checkpoint
 EVAL_ARGS="--mode sim --policy-path outputs/train/smolvla_aloha/checkpoints/last \
-           --env-id gym_aloha/AlohaInsertion-v0 --episodes 20" \
+           --env-id gym_aloha/AlohaTransferCube-v0 --episodes 20" \
   docker compose run --rm eval
 
-# 4a. Latency benchmark for one deployment config.
-BENCH_ARGS="--policy-path <checkpoint> --device cuda --precision fp16 --chunking on \
-            --tag local-fp16 --out benchmarks/results/raw/local_fp16.json" \
-  docker compose run --rm bench
-
-# 4b. (optional, with a Jetson) client/server: policy on the workstation, NX as control client.
-python deploy/client_server/server.py --policy-path <checkpoint>   # on the workstation
-python deploy/client_server/client.py --server <host:port>         # on the Xavier NX
+# async client/server (two shells) and the ROS2 stack: see deploy/README.md
+# Jetson on-device: docker compose -f docker-compose.jetson.yml run --rm bench
+# rover sim procedure: rover/README.md
 ```
-
-Every step also runs natively (same commands without the compose wrapper, e.g.
-`python -m smolvla_edge.eval ...`) if you set up a host env per the *Environment* section.
-
----
-
-## Deployment modes (Phase 2)
-
-**On-device.** SmolVLA decouples action *prediction* from *execution*, cutting task time
-~30% on average — lean on it. Run the VLM stage at low Hz, use action chunking, and apply
-INT8/quantization where the graph converts. Honest framing: full TensorRT of a SmolVLM-2 +
-flow-matching-expert VLA is non-trivial; the credible deliverable is the latency budget plus a
-clear "what converted / what didn't" table.
-
-**Client–server.** Policy on the Titan X workstation, NX as a thin control client over gRPC.
-This mirrors how real customer robots offload inference and gives the second benchmark point.
-
-See [deploy/README.md](deploy/README.md).
-
-### On-device on the Xavier NX — first measured number
-
-The fine-tuned SmolVLA now runs **on a real Jetson Xavier NX (8 GB) Developer Kit**, entirely
-on-device, via the **pure-Python ONNX Runtime GPU** path — no C++ server, no torch, no lerobot.
-The Stage-2a monolithic export bakes the instruction tokens and all normalization into the graph
-(`models/onnx/*.meta.json`), so inference needs only `numpy` + `onnxruntime-gpu`:
-
-| Device | Provider | Precision | Chunk inference (mean) | Budget |
-|---|---|---|---|---|
-| Xavier NX (JetPack 5.1, CUDA 11.4, **20 W/6-core**) | ORT CUDA EP | fp32 | **~610 ms** | 50 actions = 1 s of motion → keeps up on average |
-| RTX 2000 Ada (dev box, reference) | PyTorch | fp32 | ~300 ms | — |
-
-~2× the dev-box latency, as expected for the edge — and still under the 1 s a 50-action chunk
-buys at 50 Hz, so with async decoupling ([§ async inference](#asynchronous-inference--the-papers-algorithm-1-reproduced-in-sim)) the GPU keeps up on average.
-
-### On-device, solved: 233 ms/chunk via native torch + CUDA Graph capture
-
-The second (and winning) on-device path builds the "impossible" native stack from source —
-**PyTorch 2.2.2 (cp310, CUDA 11.8, sm_72) + LeRobot on JetPack 5** — and then fixes the real
-bottleneck. Profiling showed eager fp16 (~630 ms) is **launch-bound**: the GPU sits ~80% idle
-(tegrastats GR3D 15–26%) while the weak Carmel CPU dispatches thousands of small kernels. That
-diagnosis dictated the classical cure — **record-once-replay** — and ruled out everything that
-only shrinks per-op compute (256M backbone: 591 ms, no help; INT8: same category; full-model
-TensorRT: builder OOM on 8 GB).
-
-`torch.compile(backend="cudagraphs")` gave only ~4% (dynamo breaks on the flow-matching loop),
-but **manual `torch.cuda.CUDAGraph` capture** of the raw kernel stream works — the workload is
-static-shape (fixed camera resolution, padded task tokens, 3 flow steps, injectable noise), so
-the **entire forward** (SigLIP encoder + 16-layer VLM prefix + 3 denoise steps) captures as one
-graph after neutralizing three constant H2D copies (details + harness:
-[deploy/jetson-native-torch/README.md](deploy/jetson-native-torch/README.md)):
-
-| Xavier NX, fp16, 3 flow steps | latency |
-|---|---|
-| eager end-to-end | 608 ms |
-| graph replay only (zero CPU dispatch) | 211 ms |
-| **graphed end-to-end (preproc + copies + replay + post)** | **233 ms** |
-
-Actions are **bitwise-identical** to eager (max-abs-diff 0.00, cosine 1.000000 — same kernels,
-same order), on both captured and new observations; +0.11 GB memory. The 211 ms floor confirms
-the diagnosis: ~400 ms of the eager wall time was pure CPU dispatch. **The 8 GB Xavier now
-matches the ~230 ms laptop-class target** with no retrain and no quantization — and the rover
-case needs no host offload at all. Self-contained image: `wtlove876/smolvla-jetson:jp5-cu118`
-(Docker Hub).
-
-Two corollaries worth knowing: once dispatch is gone the board is compute-bound again, so
-**model width finally matters** — the 256M backbone, useless eager (577 vs 581 ms), drops to
-**196 ms** graphed (a 256M fine-tune would ship that). And the same capture helps the dev box
-too: RTX A2000 97 → **53 ms**. The recipe is productionized as
-`make_chunk_predictor(..., precision="fp16-graph")` (`src/smolvla_edge/cuda_graph.py` — lazy
-capture on first call, eager fallback) and `PolicyServer --precision fp16-graph`.
-
-**Closed-loop from the edge — the finish line.** With the NX *serving* the policy (gRPC over
-direct ethernet) and the dev box running the sim client, the full §async stack was measured
-end-to-end on real edge hardware (10 eps each, 700-tick budget):
-
-| NX-served (ℓ_S ≈ 0.249 s = 236 ms compute + 12 ms network) | Success | Ticks-to-success | Idle ticks/ep |
-|---|---|---|---|
-| **Async (g=0.5, ramp-in 5)** | **7/10 = 70%** | **259** | **0.0** |
-| Sync (g=0) | 7/10 = 70% | 329 | 87.6 |
-
-Success parity with the dev-box reference (70%), **21% faster time-to-success, zero idle
-ticks** — at 0.25 s in-loop latency the async operating window (ℓ/Δt ≈ 12.5 ≪ n/2 = 25) is
-wide open, so inference hides completely behind execution. The policy ran ~15×/episode against
-the 50 Hz control loop — the VLM effectively at 1.5 Hz, 1/33 of the control rate.
-
-```bash
-# on the Jetson (repo at ~/workspace/smolvla-edge-nx). One-time build (buildx-free):
-DOCKER_BUILDKIT=0 docker build -f docker/jetson_infer.Dockerfile -t smolvla-edge:jetson .
-# latency benchmark (CUDA EP; ORT_PROVIDER=tensorrt to try the TRT EP):
-docker compose -f docker-compose.jetson.yml run --rm bench
-```
-
-**What it took (all in the Jetson files):** the only cp38/CUDA-11.4 wheel for JetPack 5 is
-`onnxruntime-gpu 1.15.1` (vendored under `deploy/onnx/wheels/`), which is older than the x86
-export target — so [`deploy/onnx/patch_for_ort115.py`](deploy/onnx/patch_for_ort115.py) downgrades
-the graph IR 10→9 and casts 24 int64 `ArgMin`/`ArgMax` inputs to int32 (ORT 1.15 has no int64
-kernel). The lean `l4t-base:r35.2.1` image carries no CUDA toolkit, so
-[docker-compose.jetson.yml](docker-compose.jetson.yml) bind-mounts the host `/usr/local/cuda`
-+ cuDNN/TensorRT and sets `LD_LIBRARY_PATH` — the same pattern the rover Jetson stack uses.
-Full deployment notes: [deploy/README.md](deploy/README.md).
-
----
-
-## Asynchronous inference — the paper's Algorithm 1, reproduced in sim
-
-SmolVLA's async inference stack (paper §3.3) decouples action *execution* from chunk
-*prediction*: a `RobotClient` pops one action per control tick from a queue and, when the
-queue drops below a threshold `g·n`, sends the current observation to a (possibly remote)
-`PolicyServer` — **without stopping**. The new chunk is merged into the queue when it
-arrives. Synchronous inference is the `g = 0` limit: drain all 50 actions, stand idle
-while the next chunk computes.
-
-**Headline result** (fine-tuned SmolVLA, transfer cube, 20 episodes, identical seeds,
-fixed 700-tick budget, policy served by a separate process at 3 flow steps — in-loop
-chunk latency ≈ 0.45 s):
-
-| Mode | Success | Ticks-to-success | Idle ticks/ep |
-|---|---|---|---|
-| Idealized (frozen env — inference is free) | 16/20 = 80% | 272 | 0 |
-| Sync (`--g 0`, pays latency honestly) | 13/20 = 65% | 407 | 178 |
-| **Async (`--g 0.5 --ramp-in 5`)** | **14/20 = 70%** | **329** | 78 |
-
-**Success parity, 19% faster time-to-success** — the paper's Figure-5 claim, measured
-end-to-end in simulation. (The same stack later ran against the **Xavier NX serving the policy
-on-device** at ℓ_S ≈ 0.25 s: async 70% @ 259 ticks with **zero** idle — see
-[the edge section](#on-device-solved-233-mschunk-via-native-torch--cuda-graph-capture).) Queue dynamics match the paper's Figure 3 (sync's dead
-zero-dwells vs async's floor-avoiding zigzag; right plot is the stack under a synthetic
-140 ms server, proving the implementation reproduces the paper's exact shapes when the
-server is fast):
-
-| measured (fs3, g=0 vs g=0.5) | synthetic 140 ms server (g=0 / 0.7 / 1.0) |
-|---|---|
-| ![measured queue trace](benchmarks/results/async_queue_trace.png) | ![synthetic queue trace](benchmarks/results/async_queue_trace_synthetic.png) |
-
-### How it works
-
-```mermaid
-flowchart LR
-    subgraph CLIENT["Client process — python -m smolvla_edge.eval --inference async --server host:50051"]
-        direction TB
-        LOOP["eval loop, one 20 ms control tick:<br/>action = runner.act(obs)<br/>None ⇒ repeat last action (hold)<br/>obs = env.step(action)"]
-        subgraph RUNNER["AsyncRunner — Algorithm 1, order of checks per tick"]
-            direction TB
-            DELIVER["1. DELIVER if pending chunk arrived:<br/>fresh = chunk[pops:] — skip already-executed prefix<br/>queue = f(old, fresh), then ramp-in eases 5 ticks<br/>from the last executed action"]
-            POP["2. POP — PopFront(queue), execute this tick"]
-            TRIG["3. TRIGGER if queue/n &lt; g and none in flight:<br/>ε joint-space duplicate filter,<br/>must-go when queue is empty"]
-            IDLE["4. IDLE — queue empty, nothing arrived ⇒ None"]
-            DELIVER --> POP --> TRIG --> IDLE
-        end
-        WORKER["worker thread, max 1 in flight —<br/>measures wall latency L;<br/>virtual clock: chunk usable at<br/>tick T + ceil(L / 20 ms), never earlier"]
-        LOOP <--> RUNNER
-        TRIG -. "observation" .-> WORKER
-        WORKER -. "merged chunk" .-> DELIVER
-    end
-    subgraph SERVER["PolicyServer process, GPU — python -u deploy/client_server/server.py --flow-steps 3"]
-        direction TB
-        RPC["gRPC PredictChunk(Observation)"]
-        PIPE["saved processor pipeline:<br/>rename keys · tokenize task · normalize"]
-        MODEL["SmolVLA.predict_action_chunk:<br/>VLM prefill ~40 ms + flow steps ~30 ms each"]
-        OUT["unnormalize → ActionChunk 50×14<br/>+ recv/send timestamps (latency split)"]
-        RPC --> PIPE --> MODEL --> OUT
-    end
-    WORKER == "Observation: top camera + joints + task (~0.9 MB, ~2.3 ms on localhost)" ==> RPC
-    OUT == "ActionChunk" ==> WORKER
-```
-
-Same algorithm as [lerobot's `async_inference`](https://github.com/huggingface/lerobot/tree/main/src/lerobot/async_inference)
-(threshold trigger, skip-executed-timesteps, overlap aggregation, duplicate filter with
-must-go), with three deliberate differences:
-
-| Aspect | lerobot (real robot) | this repo (sim) |
-|---|---|---|
-| Clock | real wall clock at robot fps | **virtual tick clock**: mujoco freezes while the policy computes, so a chunk that took `L` seconds is delivered `ceil(L/Δt)` ticks after its trigger — idle is measured honestly regardless of simulator speed |
-| Transport | 2 persistent gRPC streams + receiver thread | 1 unary `PredictChunk` per request (equivalent at one-in-flight) |
-| Splice seam | none | **`--ramp-in`** — eases the first 5 post-merge actions from the last executed action |
-
-### What the paper doesn't tell you (measured here)
-
-1. **The operating envelope is a hard inequality.** No-starvation needs `g·n·Δt ≥ ℓ`;
-   no-perpetual-replanning needs `(1−g)·n·Δt ≥ ℓ`. Both ⇒ **ℓ < n·Δt/2** (500 ms at
-   n=50, 50 Hz). Outside it there is *no* good `g`: at ℓ ≈ 0.9 s async scored 45% vs
-   sync's 65%. Getting inside took a separate server process (in-process inference
-   contends with mujoco for the CPU: 333 ms exclusive → 1.0 s in-loop) and 3 flow steps
-   instead of 10 (136 ms exclusive; quality unchanged — 80% frozen-env floor at 3, 5,
-   and 10 steps alike; fp16 autocast measured *slower* on this launch-bound GPU).
-2. **Deep splices need seam smoothing.** Each merge executes `chunk[k:]` — the tail of a
-   trajectory whose first `k ≈ ℓ/Δt` actions were never followed. With absolute
-   joint-position targets, the few-degree disagreement at the seam is a torque spike,
-   ~14–19×/episode: async scored 40% *inside* the latency envelope until `--ramp-in 5`
-   (100 ms of linear easing) recovered 70%. Ruled out first, 20 episodes each:
-   aggregation choice (blend ≈ replace), replan frequency (g 0.5 vs 0.7), and
-   flow-matching noise (fixed seed: no change). lerobot's `weighted_average` smooths
-   chunk-vs-chunk overlap but not this executed-vs-new seam — invisible at their
-   few-tick splice depths, decisive at ours.
-
-Reproduce (two shells inside `docker compose run --rm shell`):
-
-```bash
-# shell 1 — policy server (GPU process)
-python -u deploy/client_server/server.py \
-  --policy-path outputs/train/smolvla_transfer_cube/checkpoints/020000 \
-  --precision fp32 --flow-steps 3 --port 50051
-
-# shell 2 — async client (add --g 0 for the sync baseline)
-python -m smolvla_edge.eval \
-  --policy-path outputs/train/smolvla_transfer_cube/checkpoints/020000 \
-  --mode sim --inference async --g 0.5 --ramp-in 5 --server localhost:50051 \
-  --env-id gym_aloha/AlohaTransferCube-v0 --episodes 20 --max-steps 700 \
-  --task "Pick up the cube with the right arm and transfer it to the left arm." \
-  --out benchmarks/results/raw/async_g05.json --save-traces
-
-# queue-trace plot (paper Fig. 3)
-python benchmarks/plot_async_queue.py benchmarks/results/raw/async_g05.json \
-  --out benchmarks/results/async_queue_trace.png
-```
-
----
-
-## ROS2 C++ deployment (Stage 1 — production-shaped async stack)
-
-The async client side of Algorithm 1, re-implemented as a **ROS2 Jazzy C++ node** driving the
-same gRPC policy server — the robot-industry shape: C++ real-time control layer, RPC boundary,
-Python-free client. Spec/design/tasks live in
-[openspec/changes/ros2-cpp-async-deployment/](openspec/changes/ros2-cpp-async-deployment/).
-
-Because the sim is locked to the py3.11 container (mujoco 2.3.7 match) and ROS2 Jazzy is a
-py3.12/24.04 world, the architecture is multi-container with **gRPC as the only thing that
-crosses container boundaries** (DDS stays inside the ROS2 container):
-
-```
-smolvla-edge:sim (py3.11, GPU)                 smolvla-edge:ros2 (Jazzy, no GPU)
-  sim-server      — gym-aloha behind SimEnv ◄─── sim_bridge (rclpy)  — owns the tick contract
-  policy-server   — unchanged Python gRPC  ◄─── async_client (rclcpp/C++) — Algorithm 1 port
-```
-
-**Equivalence gate (50 episodes, seeds 0–49, fine-tuned SmolVLA, fs3 server, g=0.5, ramp-in 5):**
-
-| Stack | Host / dt | Success | Idle | Sends/ep |
-|---|---|---|---|---|
-| ROS2 C++ client + bridge | old, matched dt | 37/50 = 74% | 0.0 | 12.9 |
-| Python `AsyncRunner` oracle | old, matched dt | 39/50 = 78% | 0.0 | ~11 |
-| **ROS2 C++ client + bridge** | **native Linux, 25 Hz** | **40/50 = 80%** | 0.04 | 12.5 |
-| **Python `AsyncRunner` oracle** | **native Linux, matched dt (fps 25)** | **33/50 = 66%** | 0.0 | 11.8 |
-
-The C++ aggregation/ramp-in is unit-tested against fixtures exported from the Python code, so the
-two are the *same algorithm*. On the fresh native-Linux head-to-head the C++ stack matches-or-beats
-the oracle on **every seed**: the 10 seeds ROS2 fails are a strict **subset** of the 17 the Python
-oracle fails (zero ROS2-only failures). The gap is not algorithmic — it is the oracle's *virtual-time*
-latency model, which makes a chunk visible at `trigger_tick + ceil(L/dt)` ticks
-([async_infer.py:187](src/smolvla_edge/async_infer.py#L187)), i.e. it **rounds the 205 ms latency up
-to a whole 6 ticks**. The ROS2 client uses *real* wall-clock chunk arrival, no rounding
-([async_client.cpp:9-11](deploy/ros2/src/smolvla_client/src/async_client.cpp#L9-L11)), so it runs
-~1 tick less stale and clears the borderline seeds the discretized oracle drops. Takeaway: **the
-real-time C++ deployment pays no accuracy penalty vs the idealized Python model — if anything the
-oracle was slightly pessimistic about it.**
-
-**The 6.6 Hz was host-specific, not architectural.** The gate above was first recorded on a
-box where `env.step` (EGL render) cost **70.5 ms** and the DDS leg ~80 ms — 151 ms/tick, 6.6 Hz.
-Re-run on a **native Linux host with a real GPU** (RTX A2000 Laptop, FastDDS `rmw_fastrtps_cpp`,
-`deploy/client_server/profile_tick.py` + in-loop instrumentation), the *same* stack runs at
-**40.0 ms/tick = 25 Hz** and both dominant costs collapse ~10×. Measured over a 50-episode
-closed-loop re-run with the **fine-tuned SmolVLA deliverable** (seeds 0–49, ~15 250 ticks, fs3
-server `--flow-steps 3 --precision fp32`, `g=0.5`, ramp-in 5). That run scored **40/50 = 80 %,
-mean idle 0.04 ticks/ep, 12.5 chunk requests/ep** — inside the original gate's binomial band
-(recorded ROS2 74 %, Python oracle 78 %), now at native 25 Hz instead of the old 6.6 Hz. One GIF
-per episode is written under `benchmarks/results/ros2/gifs_50/` (`ep<NN>_seed<NN>_<success|fail>`).
-Decomposition of one control tick (cadence is policy-agnostic — inference is off the critical path):
-
-| Tick segment | p50 | On the critical path? |
-|---|---:|---|
-| Sim + rendering (`env.step`, mujoco + EGL) | 7.3 ms | yes |
-| gRPC `Step` bridge↔sim-server, in-loop (sim + pack + net + contention) | 16.0 ms | yes |
-| Comm bridge↔client over DDS — 900 KiB obs out + action back | 11.6 ms | yes |
-| ROS2 C++ node (`on_observation` compute) | 0.06 ms | yes |
-| Sum of real work | ~28 ms | |
-| Timer quantization (28 ms rounded to 2× the 20 ms/50 Hz timer) | +12 ms | |
-| **Tick cadence** | **40.0 ms (25 Hz)** | |
-| *PredictChunk RTT client↔policy-server (SmolVLA fs3)* | *229 ms* | **no — async worker thread** |
-
-So the tick is **not** DDS-image-transport-bound here (DDS is only ~12 ms); the biggest single
-lever is the bridge's fixed 50 Hz wall timer, which rounds ~28 ms of real work up to 40 ms — an
-event-driven step would give ~35 Hz for free. The **async design works exactly as intended**:
-the 229 ms fs3 server latency is fully hidden behind queue execution (idle = 0 on every real tick,
-g=0.5 refetch at ~1 s of buffer), which is the whole point of Algorithm 1. The C++ node's own
-per-tick work is 0.06 ms. Artifacts:
-[timing_breakdown.json](benchmarks/results/ros2/timing_breakdown.json),
-[stage1_50ep.json](benchmarks/results/ros2/stage1_50ep.json) (per-episode success/reward/ticks).
-
-Reproduce:
-
-```bash
-# one-time: build the ROS2 image (thin overlay on a Jazzy dev image) and the workspace
-docker compose build ros2
-docker compose run --rm ros2 bash -c 'cd deploy/ros2 && colcon build --symlink-install'
-docker compose run --rm ros2 bash -c 'cd deploy/ros2 && colcon test --packages-select smolvla_client && colcon test-result'
-
-# regenerate Python stubs after any proto change (writes deploy/client_server/policy_pb2*.py)
-docker compose run --rm shell bash deploy/client_server/gen_proto.sh
-
-# servers (fs3 = inside the 50 Hz latency envelope; fp32 — see compose comment)
-POLICY_SERVER_ARGS="--flow-steps 3" docker compose up -d policy-server sim-server
-
-# validate the SimEnv shim is transparent (byte-identical obs/rewards vs in-process env)
-docker compose run --rm shell python deploy/client_server/sim_env_check.py \
-  --server sim-server:50052 --transparency-steps 100
-
-# the Stage-1 stack: bridge + C++ async client + event recorder (results + events JSONL out).
-# gif_dir:= writes one GIF per episode (ep<NN>_seed<NN>_<success|fail>.gif) for eyeball checks.
-docker compose run --rm ros2 ros2 launch smolvla_bridge stage1.launch.py \
-  episodes:=50 g:=0.5 ramp_in:=5 \
-  results_path:=/workspace/benchmarks/results/ros2/stage1_50ep.json \
-  events_path:=/workspace/benchmarks/results/ros2/stage1_50ep_events.jsonl \
-  gif_dir:=/workspace/benchmarks/results/ros2/gifs_50 \
-  task:="Pick up the cube with the right arm and transfer it to the left arm."
-
-# NOTE: outputs/train/smolvla_transfer_cube is gitignored — restore the fine-tuned checkpoint to
-# outputs/train/smolvla_transfer_cube/checkpoints/020000/pretrained_model/ before running (the
-# loader descends into pretrained_model/). lerobot/smolvla_base will NOT work here: it is the
-# 3-camera SO-101 model and rejects ALOHA's single top camera.
-
-# the Python oracle at matched dt, same server/seeds (the equivalence baseline)
-docker compose run --rm eval bash -lc "python -u -m smolvla_edge.eval --mode sim \
-  --inference async --g 0.5 --ramp-in 5 --fps 6.62 --server policy-server:50051 \
-  --policy-path outputs/train/smolvla_transfer_cube/checkpoints/020000 \
-  --env-id gym_aloha/AlohaTransferCube-v0 --episodes 50 --max-steps 400 \
-  --task 'Pick up the cube with the right arm and transfer it to the left arm.'"
-
-# tick-cost profile (where the 151 ms goes)
-docker compose run --rm shell python deploy/client_server/profile_tick.py --local
-docker compose run --rm ros2  python3 deploy/client_server/profile_tick.py --server sim-server:50052
-
-docker compose down   # when finished
-```
-
-Results: [benchmarks/results/ros2/](benchmarks/results/ros2/).
-
-**Stage 2a — SmolVLA out of PyTorch, into one ONNX graph (done).** `deploy/onnx/export_smolvla.py`
-exports the fine-tuned checkpoint as a **monolithic** graph: vision + the fixed-task language
-prefix (token ids baked in) + the action expert with all **10 flow-matching Euler steps
-unrolled**, with image/state normalization baked in and the denoising noise as an explicit input.
-The serving side feeds only a resized `[0,1]` image, the raw joint state, and noise. The legacy
-TorchScript exporter can't serialize the SmolVLM2 rotary embedding (`ComplexDouble`); the
-**TorchDynamo exporter** traces the whole VLM, after forcing fp32 (the backbone ships bf16) and
-down-casting the RoPE float64 nodes. `deploy/onnx/parity.py` is an **enforced** gate (non-zero
-exit on fail) comparing the graph against the exact server path over 100 held-out observations at
-a fixed noise seed — **PASS at worst max-abs-diff 4.3e-6, worst cosine 0.99999988**
-([onnx_parity.json](benchmarks/results/onnx_parity.json)).
-
-**Stage 2b — the C++ ORT server (honest negative) and how the gate actually passed.** The C++
-ONNX Runtime server (`deploy/cpp_server/`, CUDA EP, same `Policy` proto — clients run unmodified)
-is **wire-compatible and numerically correct** (parity 4e-6) but **kernel-execution-bound**: the
-TorchDynamo graph is 30 852 tiny unfused nodes, ~1.0 s/chunk on the A2000 (vs PyTorch's 229 ms),
-and TensorRT's parser rejects the graph (op-compat chain). Its 50-ep gate scored 11/50 = 22% —
-recorded as the negative result. The gate then **passed via the CUDA-graph path instead**: the
-same ROS2 stack against `policy-server --precision fp16-graph` (manual full-forward
-`torch.cuda.CUDAGraph` capture, 53 ms exclusive on the A2000, bitwise-identical actions):
-**36/50 = 72%, idle 0.0** — inside the binomial band of the 74–80% references
-([stage2_fp16graph_50ep.json](benchmarks/results/ros2/stage2_fp16graph_50ep.json)). Takeaway for
-the writeup: for this class of VLA graph, runtime-level fusion (ORT/TRT) lost to **recording the
-framework's own kernel stream** — same kernels, zero dispatch, no export at all.
-
-**Pipeline** (`scripts/deploy_pipeline.sh <checkpoint>`): one command chaining
-export → enforced parity → fp16-graph capture smoke → ROS2 closed-loop regression (≥60% gate) →
-collate, fail-fast with the failing gate named, artifacts + hash manifest under
-`benchmarks/results/pipeline/<ts>/`. Green run PASS + a forced parity failure
-(`PARITY_FLOW_STEPS=10`) demonstrating fail-fast are both committed as provenance examples.
-
-**All-ROS2: client AND policy server on ROS 2, no gRPC in the policy hop.** The final
-architecture question — can the policy hop itself be DDS? Yes, measured: the from-source JP5
-torch image is Ubuntu 22.04/py3.10, which is exactly **ROS 2 Humble's** target tier, so
-[docker/jetson_ros2_humble.Dockerfile](docker/jetson_ros2_humble.Dockerfile) overlays Humble +
-`smolvla_msgs` onto it, and [deploy/ros2/policy_node.py](deploy/ros2/policy_node.py) serves the
-**fp16-graph predictor as a native rclpy node on the Xavier NX** (`/policy/request` →
-`/policy/chunk`, request-id correlated). The C++ `async_client` gained `transport:=ros2`
-(gRPC remains the default). Cross-host, cross-distro DDS (Humble server on the NX ↔ Jazzy
-client on the dev box) discovered and interoperated on the custom message types out of the box.
-Closed loop, 10 episodes, same protocol: **8/10 = 80% success** — the same band as every healthy
-tier. Idle ticks tell the honest story: episode 0 paid 414 idle ticks (the **one-time lazy
-CUDA-graph capture** on the NX — pre-warm the node to remove it), then steady state was
-**9–17 idle ticks/ep** (~0.4 s of holds per ~30 s episode; the 900 KiB raw frame over reliable
-DDS is the remaining lever — JPEG on the wire, or pinning FastDDS to the direct ethernet link).
-For the rover this is the end-state shape: camera → `/observation` → **on-device policy node**
-→ `/action_chunk` → base controller, all DDS
-([allros2_nx_10ep.json](benchmarks/results/ros2/allros2_nx_10ep.json)).
-
----
-
-## Benchmarks (Phase 3 — the centerpiece)
-
-The headline artifact is a results table across deployment tiers plus a short GIF of the
-policy executing replayed episodes (no physical robot needed). Metrics: end-to-end latency,
-action-chunk frequency, throughput, peak memory.
-
-Results live in [benchmarks/results/](benchmarks/results/) and are summarized in
-[benchmarks/README.md](benchmarks/README.md).
 
 ---
 
@@ -657,38 +134,27 @@ Results live in [benchmarks/results/](benchmarks/results/) and are summarized in
 
 ```
 smolvla-edge-nx/
-├── src/smolvla_edge/      # infer / eval / bench entrypoints + shared utils
-│                          #   eval.py: closed-loop gym-aloha rollouts (make_sim_stepper
-│                          #   handles old- and new-format checkpoints transparently)
-│                          #   async_infer.py: AsyncRunner (paper Alg. 1) + chunk predictor
-│                          #   remote.py: gRPC chunk predictor (thin client half)
-├── scripts/               # train.sh, setup_sim.sh, make_demo_gif.py (rollout GIFs)
-├── notebooks/             # 01/02: Transformer->SmolVLA from-scratch tutorials;
-│                          #   colab_train_smolvla_aloha.ipynb: the Colab fine-tune (T4/A100)
-├── configs/               # training configs (aloha_sim primary, so101 kept for later)
-├── docker/ + docker-compose.yml   # matched mujoco 2.3.7 sim container + ROS2 Jazzy overlay;
-│                          #   services: verify / eval / infer / train / bench / shell
-│                          #   + policy-server / sim-server / ros2 (ROS2 stack)
-├── data/                  # dataset tarballs for Drive/Colab staging   (gitignored)
-├── models/                # pretrained-model cache tarball for Colab   (gitignored)
-├── outputs/               # local training checkpoints                 (gitignored)
+├── src/smolvla_edge/      # eval / bench entrypoints; AsyncRunner (paper Alg. 1);
+│                          #   cuda_graph.py (fp16-graph capture)
+├── scripts/               # train.sh, make_demo_gif.py, deploy_pipeline.sh
+├── notebooks/             # from-scratch tutorials + the Colab fine-tune notebook
+├── configs/               # training configs
+├── docker/                # sim container + ROS2 overlay + Jetson images
 ├── deploy/
-│   ├── ondevice/          # Xavier NX on-device notes, quantization/TRT attempts
-│   ├── client_server/     # gRPC server (workstation) + client, proto (Policy + SimEnv),
-│   │                      #   sim_server.py (gym-aloha shim), profile_tick.py
-│   └── ros2/              # colcon ws: smolvla_msgs / smolvla_bridge (rclpy tick owner)
-│                          #   / smolvla_client (rclcpp Algorithm-1 port + gtest)
-└── benchmarks/            # bench harness + results (summary.csv, demo.gif, results/ros2/)
+│   ├── ondevice/          # NX on-device notes, ONNX export + parity gate
+│   ├── client_server/     # gRPC policy/sim servers, tick profiler
+│   ├── ros2/              # colcon ws: C++ async client, bridge, NX policy node
+│   └── jetson-native-torch/  # the JP5 from-source torch + CUDA-graph recipe
+├── benchmarks/            # harness + results (summary.csv, GIFs, ros2/)
+├── rover/                 # ← current phase: Ackermann rover VLA, Gazebo sim-first
+│   ├── ros2/              #   rover_sim / rover_expert / rover_runtime packages
+│   ├── datagen/           #   expert episodes -> LeRobot datasets (hindsight chunks)
+│   ├── runtime/           #   policy servers (SmolVLA + OmniVLA-edge reference)
+│   └── eval*/             #   probes, closed-loop results, grounding diagnosis
+└── openspec/              # proposals, designs (D-numbered decisions), task records
 ```
-
-Project plans, design, specs, and the phased task list live in
-[openspec/changes/smolvla-edge-deployment/](openspec/changes/smolvla-edge-deployment/).
 
 ## License
 
-MIT — see [LICENSE](LICENSE).
-
-## Acknowledgements
-
-Built on [LeRobot](https://github.com/huggingface/lerobot) and the SmolVLA base model by the
-Hugging Face robotics team.
+MIT — see [LICENSE](LICENSE). Built on [LeRobot](https://github.com/huggingface/lerobot)
+and the SmolVLA base model by the Hugging Face robotics team.
