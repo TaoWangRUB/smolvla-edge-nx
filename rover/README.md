@@ -308,7 +308,7 @@ Offline on identical frames: pose swap **12/12** (29.0° bearing response) vs la
 crops. So perception and driving are fine everywhere; *binding the word to steering* fails in
 every model tested — grounding belongs to the acquisition path (D9), the policy wants a goal
 channel (tasks 2.11–2.12: SmolVLA+goal-state vs fine-tuned OmniVLA-edge bake-off).
-4-panel comparisons: `compare4_seed900*.gif` (expert | SmolVLA | OmniVLA-lang | OmniVLA-pose).
+4-panel comparisons: `gifs/compare4_seed900*.gif` (expert | SmolVLA | OmniVLA-lang | OmniVLA-pose) and `gifs/full4_900*.gif` (expert | original SmolVLA | SmolVLA+goal | OmniVLA-pose).
 Closed-loop also hardened the chunk-executor contract (recovery arc instead of zero chunks —
 an all-zero chunk permanently parks the tracker; always-reply server errors; arrival stop
 inside the ring): see D10.
@@ -317,6 +317,15 @@ inside the ring): see D10.
 reference.** Adding a 4-dim body-frame goal to `observation.state` (a data change — SmolVLA pads
 to `max_state_dim=32`, no surgery), trained frozen-backbone with detector-realistic goal noise +
 0.33 dropout:
+
+![Seed 9006 "drive to the blue crate": expert reaches; original SmolVLA (no goal) drives to the wrong object and times out; SmolVLA+goal and OmniVLA-edge both reach](gifs/full4_9006.gif)
+
+*Same scene, four policies (seed 9006, "drive to the blue crate"). **Expert** (top-left) reaches;
+**original SmolVLA** without the goal channel (top-right) drives to the wrong object — the yellow
+crate — and times out; **SmolVLA + goal channel** (bottom-left) and **OmniVLA-edge goal-pose**
+(bottom-right) both reach the commanded blue crate. Regenerate any seed with
+`rover/eval_results/compare_grid_gif.py`; all 10 four-panel gifs and the per-policy overviews are
+in `rover/gifs/`.*
 
 | seeds 9000–9009, same tracker/referee | success |
 |---|---|
@@ -330,7 +339,7 @@ residual is the **last-meter problem**, not grounding: the policy stops where th
 (~0.56 m ring edge) and the tracker parks ~0.15 m short → ~0.7–0.9 m out. The *arrival assist* — a
 geometric server-side override that drives the final ~0.15 m into the ring (no model change) —
 closes it, the same executor treatment OmniVLA-edge got. Remaining misses (9000 wander,
-9001/9007 grazes at −6/−7 mm) are the clutter class both models share. GIFs: `gifs_v3g2/`.
+9001/9007 grazes at −6/−7 mm) are the clutter class both models share. GIFs: `rover/gifs/`.
 Two serving bugs fixed along the way (they made a good model look broken): the lerobot-0.4.4
 normalization pipeline wasn't loaded (goal channel appeared dead; also inflates all historical
 raw-served numbers — stage1c_v3 is really 0/10, not 3/10), and `--arrival-assist` was dropped by

@@ -311,7 +311,7 @@ purchase is gated behind M2 (except camera *selection*, which is an M0 task by d
       Fixes: Ackermann-feasible recovery arc (R ≥ 0.36 m), in-ring approach stop (0.40 m),
       always-reply error path; 32 unit checks. Remaining failures are model-level: 2 transit
       grazes (−0.005/−0.017 m), 1 goal-blocked-by-prop hold. Warm latency 56–80 ms (vs
-      SmolVLA 280 ms) on the Titan X. Artifacts: `compare4_seed900*.gif` (expert | SmolVLA |
+      SmolVLA 280 ms) on the Titan X. Artifacts: `rover/gifs/compare4_seed900*.gif` (expert | SmolVLA |
       OmniVLA-lang | OmniVLA-pose), traces in `eval_traces_omnivla_{lang,pose}_v2/`.
       **Decisions:** (a) **v4 short-horizon dataset deprioritized** — it tests the visibility
       confound, but the pose-vs-language contrast (7/10 vs 4/10 in one model on identical
@@ -343,7 +343,7 @@ purchase is gated behind M2 (except camera *selection*, which is an M0 task by d
       ~0.15 m into the ring; `approach_chunk` targets 0.40 m so realised stop 0.40–0.55 m) closes
       it — the SAME executor treatment OmniVLA-edge got, so 7-vs-7 is symmetric. Six clean reaches
       at 0.59–0.60 m; the three misses (9000 wander, 9001/9007 grazes −6/−7 mm) are the clutter
-      class, shared with OmniVLA-edge. GIFs: `rover/gifs_v3g2/v3g2_900*.gif`.
+      class, shared with OmniVLA-edge. GIFs: `rover/gifs/v3g2_900*.gif`, four-panel `rover/gifs/full4_900*.gif`.
 
       **Two serving bugs found and fixed (they masqueraded as model failures — the model was fine
       from stage1_v3g on):** (1) lerobot 0.4.4 keeps normalization in a *separate* processor file
