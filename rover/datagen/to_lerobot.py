@@ -80,17 +80,27 @@ def lerp_yaw(pose_rows, t):
 
 
 def convert(raw_root, out_root, repo_id, fps, include_failures,
-            chunk_k=0, chunk_dt=0.25, use_paraphrase=False, scenes=None):
+            chunk_k=0, chunk_dt=0.25, use_paraphrase=False, scenes=None,
+            goal_state_p_drop=None):
     import cv2
     from lerobot.datasets.lerobot_dataset import LeRobotDataset
 
-    if chunk_k or use_paraphrase:
+    if chunk_k or use_paraphrase or goal_state_p_drop is not None:
         import sys as _sys
         _sys.path.insert(0, str(pathlib.Path(__file__).parent))
-    if chunk_k:
+    if chunk_k or goal_state_p_drop is not None:
         from relabel import PoseTrack, waypoint_chunk
+    if goal_state_p_drop is not None:
+        from relabel import goal_state
     if use_paraphrase:
         from instructions import paraphrase
+
+    # Goal-channel noise (task 2.11 / design D10): per-episode bias models the
+    # acquisition path's systematic error (one detection, held by goal memory),
+    # per-frame jitter the odom/projection noise. Scales approximate the
+    # measured 5-16 cm ranging error across 2.0-3.5 m (D9 validation).
+    GOAL_BIAS_SIGMA = 0.05    # m, drawn once per episode
+    GOAL_JITTER_SIGMA = 0.03  # m, drawn per frame
 
     out = pathlib.Path(out_root) / repo_id.split('/')[-1]
     if out.exists():
@@ -108,8 +118,13 @@ def convert(raw_root, out_root, repo_id, fps, include_failures,
     features = {
         'observation.image': {'dtype': 'video', 'shape': (800, 1280, 3),
                               'names': ['height', 'width', 'channels']},
-        'observation.state': {'dtype': 'float32', 'shape': (3,),
-                              'names': ['speed', 'yaw_rate', 'steering']},
+        'observation.state': (
+            {'dtype': 'float32', 'shape': (7,),
+             'names': ['speed', 'yaw_rate', 'steering',
+                       'goal_x', 'goal_y', 'goal_cos', 'goal_sin']}
+            if goal_state_p_drop is not None else
+            {'dtype': 'float32', 'shape': (3,),
+             'names': ['speed', 'yaw_rate', 'steering']}),
         'observation.gt_pose': {'dtype': 'float32', 'shape': (3,),
                                 'names': ['x', 'y', 'yaw']},
         'action': action_feature,
@@ -145,7 +160,19 @@ def convert(raw_root, out_root, repo_id, fps, include_failures,
         if use_paraphrase:
             goal = cfg['props'][cfg['goal_index']]
             task = paraphrase(goal['color'], goal['shape'], cfg['seed'])
-        track = PoseTrack(pose_rows) if chunk_k else None
+        track = (PoseTrack(pose_rows)
+                 if (chunk_k or goal_state_p_drop is not None) else None)
+
+        goal_cfg = None
+        if goal_state_p_drop is not None:
+            # Seed-deterministic per episode: bias, jitter and the dropout
+            # draw all reproduce on reconversion (same convention as the
+            # paraphrase draw).
+            g = cfg['props'][cfg['goal_index']]
+            rng = np.random.default_rng(cfg['seed'] * 9973 + 411)
+            dropped = rng.random() < goal_state_p_drop
+            bias = rng.normal(0.0, GOAL_BIAS_SIGMA, size=2)
+            goal_cfg = (g, rng, dropped, bias)
 
         for fr in frames:
             img = cv2.imread(str(ep / 'frames' / f"{fr['i']:06d}.jpg"))
@@ -156,10 +183,21 @@ def convert(raw_root, out_root, repo_id, fps, include_failures,
             else:
                 action = np.asarray(cmd.hold(fr['t']) or [0.0, 0.0],
                                     dtype=np.float32)
+            obs_state = np.asarray(state.lerp(fr['t']), dtype=np.float32)
+            if goal_cfg is not None:
+                g, rng, dropped, bias = goal_cfg
+                if dropped:
+                    gs = [0.0, 0.0, 0.0, 0.0]   # reserved no-goal value
+                else:
+                    gs = goal_state(track, fr['t'], (g['x'], g['y']),
+                                    bias=bias,
+                                    jitter=rng.normal(0.0, GOAL_JITTER_SIGMA,
+                                                      size=2))
+                obs_state = np.concatenate(
+                    [obs_state, np.asarray(gs, dtype=np.float32)])
             frame = {
                 'observation.image': cv2.cvtColor(img, cv2.COLOR_BGR2RGB),
-                'observation.state': np.asarray(state.lerp(fr['t']),
-                                                dtype=np.float32),
+                'observation.state': obs_state,
                 'observation.gt_pose': np.asarray(lerp_yaw(pose_rows, fr['t']),
                                                   dtype=np.float32),
                 'action': action,
@@ -192,11 +230,18 @@ def main():
     ap.add_argument('--paraphrase', action='store_true',
                     help='replace canonical instructions with train-pool '
                          'paraphrases (heldout pool stays reserved)')
+    ap.add_argument('--goal-state', type=float, default=None, metavar='P_DROP',
+                    help='append the 4-dim goal channel [gx, gy, cos, sin] to '
+                         'observation.state (task 2.11 / design D10); the value '
+                         'is the per-episode goal-dropout probability (e.g. 0.3;'
+                         ' dropped episodes carry the all-zero no-goal value so '
+                         'language stays load-bearing)')
     args = ap.parse_args()
     convert(args.raw_root, args.out, args.repo_id, args.fps,
             args.include_failures, args.chunk_k, args.chunk_dt,
             args.paraphrase,
-            scenes=[s for s in args.scenes.split(',') if s] or None)
+            scenes=[s for s in args.scenes.split(',') if s] or None,
+            goal_state_p_drop=args.goal_state)
 
 
 if __name__ == '__main__':

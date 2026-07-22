@@ -52,6 +52,12 @@ def main():
     policy.eval().to(args.device)
     tokenize = make_language_tokenizer(policy, args.device)
     tok_cache = {}
+    # 3 for the classic checkpoints, 7 for goal-state ones (task 2.11).
+    try:
+        state_dim = policy.config.input_features['observation.state'].shape[0]
+    except (AttributeError, KeyError):
+        state_dim = 3
+    print(f'state_dim={state_dim}', flush=True)
 
     srv = socket.create_server(('0.0.0.0', args.port))
     print(f'policy server on :{args.port} (device={args.device})', flush=True)
@@ -70,10 +76,23 @@ def main():
             task = header['instruction']
             if task not in tok_cache:
                 tok_cache[task] = tokenize(task)
+            state = list(header['state'])
+            if state_dim == 7 and len(state) == 3:
+                # Goal-state checkpoint (task 2.11): append [gx, gy, cos, sin]
+                # from the client's optional goal_body (sent under
+                # --send-goal / by goal_memory_node). Absent goal -> the
+                # reserved all-zero no-goal value the policy was trained on.
+                gb = header.get('goal_body')
+                if gb:
+                    import math as _m
+                    psi = _m.atan2(gb[1], gb[0])
+                    state += [gb[0], gb[1], _m.cos(psi), _m.sin(psi)]
+                else:
+                    state += [0.0, 0.0, 0.0, 0.0]
             batch = {
                 'observation.images.camera1': im.unsqueeze(0).to(args.device),
                 'observation.state': torch.tensor(
-                    header['state'], dtype=torch.float32).unsqueeze(0).to(args.device),
+                    state, dtype=torch.float32).unsqueeze(0).to(args.device),
             }
             batch.update(tok_cache[task])
             with torch.no_grad():
