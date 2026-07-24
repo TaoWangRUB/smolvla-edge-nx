@@ -3,6 +3,7 @@ overview_*.gif
 colab_upload/
 eval_results/clip_crops/
 
-# eval result gifs (local artifacts; hero gif force-added for the README)
+# eval result gifs (local artifacts; hero gifs force-added for the READMEs)
 gifs/
 !gifs/full4_9006.gif
+!gifs/row4_9006.gif
