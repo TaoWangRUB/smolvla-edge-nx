@@ -101,6 +101,31 @@ targets inside the policy; the measured escape is the mission-layer split: an
 open-vocabulary detector *selects* (94 % offline), goal memory persists the target in the
 odom frame, and the policy *steers* on a goal channel (design D9/D10, tasks 2.10–2.12).
 
+![Seed 9006, "drive to the blue crate": four policies in one frame-synchronised row — expert, original SmolVLA (no goal), SmolVLA+goal, and OmniVLA-edge goal-pose](rover/gifs/row4_9006.gif)
+
+*Four policies, one scene, `"drive to the blue crate"` (seed 9006, world-frame overview,
+time-aligned). Left → right: **expert** (privileged A*) reaches; **original SmolVLA** with no
+goal channel drives to the wrong object — the yellow crate — and times out; **SmolVLA + goal
+channel** reaches; **OmniVLA-edge (goal pose)** reaches. Regenerate any seed with
+`rover/eval_results/grid_to_row.py`; all 10 rows and the 2×2 grids live in [rover/gifs/](rover/gifs/).*
+
+**What wins.** The goal channel *closes the M1 grounding gap*: SmolVLA now drives to the
+**commanded** object instead of the nearest/wrong one, scoring **7/10** — parity with the
+nav-pretrained OmniVLA-edge reference that is 9× smaller. And it's a **data change, not
+surgery**: a 4-dim body-frame goal appended to `observation.state` (SmolVLA pads to
+`max_state_dim=32`), trained frozen-backbone with detector-realistic goal noise + 0.33 dropout.
+The panels make the contrast literal — panel 2 (no goal) confidently reaches the *wrong* crate;
+panels 3–4 reach the right one.
+
+**What can be improved.** The residual is the **last-meter / docking problem, not grounding**:
+the policy stops where the expert demos stop (~0.56 m ring edge) and the tracker parks ~0.15 m
+short → ~0.7–0.9 m outside the goal ring. Today a geometric *arrival assist* (a server-side
+override for the final ~0.15 m, no model change) closes it; that's a stopgap. The real M2 fix is
+to **remove speed from the action space** (executor owns speed + ring-stop from goal range) plus
+**DAgger on terminal states** ([design D11](openspec/changes/rover-vla-sim-first/design.md)).
+Remaining misses (9000 wander, 9001/9007 grazes at −6/−7 mm) are a clutter class both models
+share.
+
 Everything — vehicle sim, expert datagen, training recipes, eval harness, the grounding
 diagnosis, and the per-decision record — lives in [rover/README.md](rover/README.md) and
 [openspec/changes/rover-vla-sim-first/](openspec/changes/rover-vla-sim-first/).
